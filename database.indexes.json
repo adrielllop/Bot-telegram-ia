@@ -1,0 +1,6 @@
+{
+  "rules": {
+    "keys": { ".indexOn": ["status", "userId", "createdAt"] },
+    "users": { ".indexOn": ["accessActive", "expiresAt"] }
+  }
+}

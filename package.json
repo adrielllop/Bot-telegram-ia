@@ -1,0 +1,20 @@
+{
+  "name": "mestrexit-ia-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bot de IA para Telegram com licenças Firebase, painel administrativo e webhook Vercel.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npx vercel dev",
+    "test": "node --test",
+    "register:commands": "node scripts/register-commands.js",
+    "set:webhook": "node scripts/set-webhook.js",
+    "check": "node --check telegram.js && node --check bot.js && node --check firebase.js && node --check telegram-api.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0"
+  }
+}
