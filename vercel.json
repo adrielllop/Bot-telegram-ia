@@ -1,9 +1,16 @@
+
 {
   "version": 2,
   "builds": [
     {
       "src": "telegram.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "logo.png",
+          "tutorial-id.png"
+        ]
+      }
     }
   ],
   "routes": [
@@ -12,12 +19,6 @@
       "dest": "/telegram.js"
     }
   ],
-  "functions": {
-    "telegram.js": {
-      "maxDuration": 60,
-      "includeFiles": "*.png"
-    }
-  },
   "headers": [
     {
       "source": "/(.*)",
