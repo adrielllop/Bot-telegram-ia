@@ -1,12 +1,10 @@
 MestreXit.ia — instruções rápidas
 
 1. Extraia o ZIP. Todos os arquivos estão na raiz, sem subpastas; mantenha-os juntos ao enviar ao GitHub Mobile. Instale Node.js 20+.
-2. Execute npm install.
-3. Cadastre as variáveis de .env.example no ambiente local/Vercel. Nunca compartilhe tokens.
-4. Configure Firebase Realtime Database e credenciais de serviço conforme README.md.
-5. Publique o repositório na Vercel; depois configure APP_BASE_URL.
-6. Execute npm test e npm run check.
-7. Com TELEGRAM_BOT_TOKEN, execute npm run register:commands e npm run set:webhook.
-8. Teste /start no chat privado do bot e valide separadamente com usuário não administrador.
+2. Publique o repositório na Vercel e configure só estes quatro valores em Settings → Environment Variables: TELEGRAM_BOT_TOKEN, FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_JSON e OPENAI_API_KEY.
+3. Use uma credencial Firebase nova. Não publique o JSON de serviço nem tokens no GitHub.
+4. Faça deploy. No terminal local, execute npm install, npm test e npm run check.
+5. Registre webhook e comandos uma vez, conforme os comandos seguros no README.md; precisa do token do BotFather e da URL pública Vercel.
+6. Teste /start no chat privado do bot e valide separadamente com usuário não administrador.
 
 Integrações externas não foram verificadas ao vivo por não haver credenciais no ambiente.

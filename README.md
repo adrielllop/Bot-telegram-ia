@@ -36,8 +36,8 @@ Bot Node.js para Vercel Functions, com webhook do Telegram, Firebase Realtime Da
 ## Passo 2 — configurar Firebase Realtime Database
 
 1. Crie um projeto em Firebase Console e habilite Realtime Database.
-2. Copie a URL regional mostrada no Console para `FIREBASE_DATABASE_URL`.
-3. Publique as regras restritivas em `database.rules.json` e os índices em `database.indexes.json` (combine ambos no arquivo de regras do Console: `.read`/`.write` permanecem falsos; coloque `.indexOn` nos nós `keys` e `users`). O Admin SDK do servidor usa a conta de serviço e não depende de acesso público.
+2. A URL informada para seu banco já está preenchida como `FIREBASE_DATABASE_URL` no `.env.example`.
+3. Abra `database.rules.json` neste ZIP e cole o conteúdo completo no campo **Rules** do RTDB. Ele já combina as regras restritivas e os índices; `database.indexes.json` fica como referência separada. O Admin SDK do servidor usa a conta de serviço e não depende de acesso público.
 4. O app inicializa as raízes automaticamente conforme a utilização; não precisa criar keys manualmente.
 
 Exemplo combinado para colar no campo **Rules** do RTDB:
@@ -76,35 +76,38 @@ Exemplo combinado para colar no campo **Rules** do RTDB:
 
 ## Passo 6 — configurar variáveis
 
-Copie `.env.example` como referência. Campos essenciais:
+São necessários somente quatro valores na Vercel:
 
-- Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` (segredo aleatório, 1–256 caracteres de `[A-Za-z0-9_-]`), `APP_BASE_URL`.
-- Firebase: `FIREBASE_DATABASE_URL` e `FIREBASE_SERVICE_ACCOUNT_JSON` ou `FIREBASE_SERVICE_ACCOUNT_BASE64`.
-- IA: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`.
-- Imagens: `IMAGE_API_KEY`, `IMAGE_API_URL`, `IMAGE_MODEL`, limite diário e timeouts.
+- `TELEGRAM_BOT_TOKEN` — token do BotFather.
+- `FIREBASE_DATABASE_URL` e `FIREBASE_SERVICE_ACCOUNT_JSON` — URL do Realtime Database e credencial privada de serviço.
+- `OPENAI_API_KEY` — uma única chave é reutilizada para respostas e imagens; não configure `IMAGE_API_KEY` separadamente.
 
-Os endpoints de chat e imagem devem obedecer aos formatos OpenAI-compatible implementados. Para outros provedores, ajuste os adaptadores em `bot.js` mantendo autenticação e limites.
+O ID administrativo `8646015281` já está fixado no código. O segredo do webhook é derivado automaticamente do token do Telegram. Modelos, endpoints e limites usam padrões no código, então você não precisa preencher dezenas de variáveis. Para outro provedor, será necessário adaptar `bot.js`. O prompt tenta evitar recusas desnecessárias, mas nenhum provedor garante uso literalmente sem restrições; políticas, limites de uso e cobrança do provedor continuam valendo.
 
 ## Passo 7 — configurar webhook do Telegram
 
-Depois de incluir as variáveis localmente (não as copie para este chat):
+Depois do deploy, execute uma vez em um terminal local. O comando abaixo lê o token sem mostrá-lo na tela; cole o token quando solicitado:
 
 ```bash
+read -s -p "Token do BotFather: " TELEGRAM_BOT_TOKEN; echo
+export TELEGRAM_BOT_TOKEN
 npm install
-npm run set:webhook
+npm run set:webhook -- https://SEU-PROJETO.vercel.app
+npm run register:commands
+unset TELEGRAM_BOT_TOKEN
 ```
 
-O script chama `setWebhook` em `https://<domínio>/api/telegram`, envia o secret token e permite atualizações de mensagens e callbacks. O endpoint aceita `GET` para health check e valida `POST` pelo header secreto. A resposta ao webhook é processada na própria execução; a função é limitada pelo timeout configurado.
+O script chama `setWebhook` em `https://SEU-PROJETO.vercel.app/api/telegram`, deriva e registra o secret token, e habilita mensagens e callbacks. O endpoint valida esse mesmo segredo. A resposta ao webhook é processada na própria execução e limitada pelo tempo máximo da função.
 
 Para remover o webhook manualmente, use Bot API `deleteWebhook` apenas se realmente desejar interromper o bot.
 
 ## Passo 8 — configurar a API de IA
 
-Adicione a chave do provedor e o nome de um modelo disponível em `OPENAI_API_KEY` e `OPENAI_MODEL`. `OPENAI_BASE_URL` é a raiz compatível com `/chat/completions`. A resposta é tratada em blocos abaixo do limite do Telegram. Histórico tem limite configurável em `AI_HISTORY_MESSAGES`.
+Adicione `OPENAI_API_KEY` nas variáveis da Vercel. O padrão do código fornece a API de chat e o modelo. A mesma chave é usada para geração de imagens. A resposta é tratada em blocos abaixo do limite do Telegram.
 
 ## Passo 9 — configurar geração de imagens
 
-Defina chave, URL completa da API e modelo em `IMAGE_API_KEY`, `IMAGE_API_URL` e `IMAGE_MODEL`; configure o limite por usuário/dia em `IMAGE_DAILY_LIMIT`. A integração aceita retorno `b64_json` ou URL HTTP(S), baixa a imagem e envia o arquivo ao Telegram. Os dois PNG ficam diretamente na raiz do repositório. O padrão de upload é limitado a 9,5 MB para manter margem ao limite de foto do Bot API. Confirme no provedor contratado o formato de retorno, o suporte a `size`/`quality`, limites, política e cobrança.
+Não precisa configurar outra variável de imagem: o código usa a mesma `OPENAI_API_KEY` e os padrões de endpoint e modelo definidos. A integração aceita retorno `b64_json` ou URL HTTP(S), baixa a imagem e envia o arquivo ao Telegram. Os dois PNG ficam diretamente na raiz do repositório. O padrão de upload é limitado a 9,5 MB para manter margem ao limite de foto do Bot API. O uso da API externa pode gerar cobrança e continua sujeito aos limites e regras do provedor.
 
 **Tempo de execução (limitação conhecida):** o fluxo de imagem é síncrono, com timeout reduzido para deixar margem dentro de uma função Vercel de 60 segundos. Ele não mantém um processo contínuo nem simula imagens. Se o provedor exceder esse limite, a solicitação falha com mensagem de timeout; **a fila/worker assíncrono persistente para tarefas longas ainda precisa ser integrada** (por exemplo, Cloud Tasks/Cloud Run ou serviço equivalente), provisionada e testada antes de uso com provedores lentos ou tarefas longas. Esse componente externo não foi incluído nesta entrega.
 
@@ -113,11 +116,9 @@ Defina chave, URL completa da API e modelo em `IMAGE_API_KEY`, `IMAGE_API_URL` e
 ```bash
 npm test
 npm run check
-npm run register:commands
-npm run set:webhook
 ```
 
-Os dois scripts Telegram precisam de `TELEGRAM_BOT_TOKEN` no ambiente local. Os testes unitários são locais e não acessam serviços externos. Após deploy, confira `GET https://<domínio>/api/telegram` e teste no Telegram `/start`, inserir uma Key, ativação, `/status`, `/ia`, `/imagem` e as funções administrativas com as duas contas (admin e não-admin).
+Os testes unitários são locais e não acessam serviços externos. Após deploy, confira `GET https://<domínio>/api/telegram` e teste no Telegram `/start`, inserir uma Key, ativação, `/status`, `/ia`, `/imagem` e as funções administrativas com as duas contas (admin e não-admin).
 
 ## Testes nesta entrega
 

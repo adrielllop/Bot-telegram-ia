@@ -1,0 +1,47 @@
+MESTREXIT.IA — COMO ENVIAR PELO GITHUB MOBILE E PUBLICAR NA VERCEL
+
+ANTES DE COMEÇAR
+- Use o ZIP limpo recebido. O arquivo .env.example contém somente campos vazios; não cole seus tokens nele.
+- Nunca envie .env, a chave JSON privada do Firebase ou chaves reais da OpenAI/Telegram ao repositório.
+- O arquivo database.rules.json contém apenas as regras públicas do RTDB e pode ficar no repositório.
+
+1) EXTRAIR O ZIP NO CELULAR
+- Baixe MestreXit.ia-Vercel.zip.
+- No app Arquivos ou ZArchiver, extraia o ZIP.
+- Abra a pasta extraída MestreXit.ia-Vercel. Os arquivos do projeto ficam nela; não envie o ZIP compactado como substituto dos arquivos.
+
+2) ENVIAR AO GITHUB MOBILE
+- Abra o repositório GitHub correto (ex.: Bot-telegram-ia).
+- Se ele já tiver os arquivos de uma tentativa anterior, atualize/substitua pelos arquivos limpos extraídos. Não mantenha uma versão antiga de .env.example com uma chave real.
+- Use Add file → Upload files (ou o botão + → Upload files no app).
+- Selecione os arquivos do projeto na pasta extraída e confirme o envio/commit.
+- Inclua database.rules.json, database.indexes.json, vercel.json, package.json, package-lock.json, fontes e imagens.
+- NÃO inclua nenhum arquivo .env preenchido nem o JSON da conta de serviço Firebase.
+- O .env.example é só modelo com valores vazios; pode ser enviado, mas nunca cole chaves nele.
+- Se aparecer alerta GitHub “Secret scanning”, escolha Cancel e corrija o arquivo. Não escolha “Allow Secret”.
+
+3) CONFIGURAR A VERCEL
+- Na Vercel, importe o repositório pelo painel: Add New → Project → Import Git Repository.
+- Framework Preset: Other; deixe Root Directory na pasta raiz do projeto.
+- Em Settings → Environment Variables, configure valores para Production:
+  TELEGRAM_BOT_TOKEN = token do BotFather
+  FIREBASE_DATABASE_URL = https://mestrexit-ia-default-rtdb.firebaseio.com
+  FIREBASE_SERVICE_ACCOUNT_JSON = conteúdo COMPLETO de uma chave Firebase NOVA, marcada como Secret
+  OPENAI_API_KEY = chave OpenAI, marcada como Secret
+- O ID admin 8646015281 já está no código. Não crie variável para ele.
+- Salve e faça Deploy. Quando alterar qualquer variável, faça um novo deploy.
+
+4) REGRAS DO FIREBASE REALTIME DATABASE
+- No Firebase Console, abra Realtime Database → Rules.
+- Abra database.rules.json no repositório, copie o arquivo inteiro e cole no campo Rules.
+- Clique em Publish.
+- A chave privada do Firebase não é esse arquivo de regras: ela fica somente na variável FIREBASE_SERVICE_ACCOUNT_JSON da Vercel.
+
+5) REGISTRAR O WEBHOOK DO TELEGRAM
+- Após o Deploy, siga o passo de webhook no README.md: execute o script local uma vez usando o token do BotFather digitado no prompt oculto e a URL pública Vercel.
+- Nunca publique nem envie o token no GitHub, na conversa ou no texto do comando.
+
+SE A CHAVE REAL JÁ FOI ENVIADA AO GITHUB
+- Remover o texto do arquivo não apaga o segredo do histórico do Git.
+- Revogue a chave exposta no painel que a emitiu e crie outra antes de configurar a Vercel.
+- Se foi a chave OpenAI, crie outra no painel de API da OpenAI. Se foi uma chave Firebase, revogue-a no Google Cloud/Firebase e gere outra.

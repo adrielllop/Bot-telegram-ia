@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { claimUpdate, database, finishUpdate } from './firebase.js';
 import { processUpdate } from './bot.js';
 
@@ -32,7 +32,9 @@ export default async function handler(req, res) {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const secret = process.env.TELEGRAM_BOT_TOKEN
+    ? createHmac('sha256', process.env.TELEGRAM_BOT_TOKEN).update('MestreXit.ia:webhook-secret:v1').digest('hex')
+    : '';
   if (!secret || !safeEqual(req.headers['x-telegram-bot-api-secret-token'], secret)) {
     res.status(401).json({ error: 'Unauthorized' });
     return;

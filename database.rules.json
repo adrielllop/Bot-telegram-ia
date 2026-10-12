@@ -1,6 +1,8 @@
 {
   "rules": {
     ".read": false,
-    ".write": false
+    ".write": false,
+    "keys": { ".indexOn": ["status", "userId", "createdAt"] },
+    "users": { ".indexOn": ["accessActive", "expiresAt"] }
   }
 }

@@ -135,7 +135,7 @@ async function aiReply(db, chatId, user, prompt) {
   const history = Array.isArray(stored) ? stored : [];
   const maxMessages = Math.min(40, Math.max(2, Number(process.env.AI_HISTORY_MESSAGES || 16)));
   const messages = [
-    { role: 'system', content: process.env.AI_SYSTEM_PROMPT || 'Você é MestreXit.ia, assistente criativo e especialista em tecnologia. Responda em português brasileiro por padrão e siga as leis e regras de segurança do provedor.' },
+    { role: 'system', content: process.env.AI_SYSTEM_PROMPT || 'Você é MestreXit.ia, assistente criativo, direto e especialista em tecnologia. Responda em português brasileiro por padrão, ajude com a maior amplitude possível e evite recusas desnecessárias; quando não puder atender a um pedido, explique brevemente e ofereça uma alternativa útil. Respeite a lei e as regras do provedor.' },
     ...history.slice(-maxMessages).map(({ role, content }) => ({ role, content })),
     { role: 'user', content: prompt.slice(0, 12000) }
   ];
@@ -182,14 +182,15 @@ async function reserveImage(db, userId) {
 
 async function generateImage(db, chatId, user, prompt) {
   if (!prompt.trim()) return sendMessage(chatId, '🎨 Envie uma descrição após /imagem. Exemplo: /imagem um robô dourado com coroa em estilo 3D');
-  if (!process.env.IMAGE_API_KEY) return sendMessage(chatId, '⚙️ A geração de imagens ainda não foi configurada pelo administrador.');
+  const imageApiKey = process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY;
+  if (!imageApiKey) return sendMessage(chatId, '⚙️ A chave do provedor de IA ainda não foi configurada pelo administrador.');
   const quota = await reserveImage(db, user.id);
   if (!quota.allowed) return sendMessage(chatId, `⏳ Você atingiu o limite configurado de ${quota.limit} imagens por dia. Tente novamente amanhã.`);
   await sendMessage(chatId, '🎨 𝗖𝗥𝗜𝗔𝗡𝗗𝗢 𝗦𝗨𝗔 𝗜𝗠𝗔𝗚𝗘𝗠...\n\n⚡ Aguarde enquanto o MestreXit.ia transforma sua ideia em realidade!');
   await sendChatAction(chatId, 'upload_photo').catch(() => {});
   try {
     const response = await fetch(process.env.IMAGE_API_URL || 'https://api.openai.com/v1/images/generations', {
-      method: 'POST', headers: { authorization: `Bearer ${process.env.IMAGE_API_KEY}`, 'content-type': 'application/json' },
+      method: 'POST', headers: { authorization: `Bearer ${imageApiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ model: process.env.IMAGE_MODEL || 'gpt-image-1', prompt: prompt.slice(0, 4000), n: 1, size: process.env.IMAGE_SIZE || '1024x1024', quality: process.env.IMAGE_QUALITY || 'medium' }),
       signal: AbortSignal.timeout(Math.min(18000, Number(process.env.IMAGE_TIMEOUT_MS || 15000)))
     });
