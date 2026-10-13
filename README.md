@@ -1,19 +1,19 @@
 # MestreXit.ia — bot de IA para Telegram
 
-Bot Node.js para Vercel Functions, com webhook do Telegram, Firebase Realtime Database, licenças numéricas de 16 dígitos, painel administrativo, API de chat compatível com OpenAI e geração de imagens configurável. As imagens anexadas foram incluídas em `logo.png` e `tutorial-id.png`.
+Bot Node.js para Vercel Functions, com webhook do Telegram, Firebase Realtime Database, Keys novas numéricas de 6 dígitos (Keys antigas de 16 dígitos continuam aceitas), painel administrativo, API de chat compatível com OpenAI e geração de imagens configurável. As imagens anexadas foram incluídas em `logo.png` e `tutorial-id.png`.
 
 > **Estado desta entrega:** o código, os testes unitários e os passos de deploy estão preparados. Não foi possível comprovar uma conversa Telegram, gravação Firebase, resposta de modelo ou imagem ao vivo porque não foram fornecidos tokens/credenciais nem uma implantação. Não coloque segredos em mensagens, neste ZIP ou em commits públicos.
 
 ## O que está implementado
 
-- `/start`: envia a logo original com exatamente os dois botões principais (INSERIR KEY e PAINEL ADM).
-- `/key` e ativação: verifica Key existente/disponível, pede confirmação do ID do remetente real do Telegram e também oferece o botão MOSTRAR MEU ID. O número digitado é comparado ao `from.id` recebido pela API. A imagem tutorial anexada é enviada nesse passo.
+- `/start`: envia a logo original com os botões INSERIR KEY, MOSTRAR MEU ID e PAINEL ADM.
+- `/key` e ativação: verifica Key existente/disponível, solicita ID após validar a Key (sem iniciar a contagem), fornece o botão COPIAR MEU ID e o comando `/id`. Para o próprio ID, o número é comparado ao `from.id` real do Telegram. Para outro ID, envia uma solicitação que somente o titular confirma no próprio Telegram (válida por 15 minutos).
 - Ativação final: transação RTDB na Key impede que duas contas ativem simultaneamente a mesma licença; a contagem começa na ativação. O vínculo contém Telegram ID e username quando disponível.
-- `/status`, `/ajuda`, `/limpar`, `/ia`, `/imagem`; mensagens normais também são encaminhadas à IA com licença ativa.
+- `/id`, `/status`, `/ajuda`, `/limpar`, `/ia`, `/imagem`; mensagens normais também são encaminhadas à IA com licença ativa.
 - História de conversa separada por usuário; `/limpar` remove somente a própria conversa.
 - Limite diário de imagens por usuário configurável, controlado por transação Firebase.
 - `/admin` e todos os callbacks/operações administrativas conferem o `from.id` real contra `8646015281`.
-- Geração criptograficamente segura de Keys numéricas, todas as 10 durações especificadas, limite de lote e gravação no Firebase antes de exibir.
+- Geração criptograficamente segura de Keys de 6 dígitos, todas as 10 durações, até 6 Keys por lote por padrão (máximo configurável 20), botão COPIAR KEY e gravação no Firebase antes de exibir.
 - Listagem paginada por chave, detalhe, pausar, retomar com restante congelado, resetar (com confirmação), revogar/excluir (com confirmação), usuários ativos e estatísticas baseadas no Firebase.
 - Verificação de vencimento em cada operação protegida, controle de tentativas de Key e deduplicação de `update_id` com lease no Firebase.
 - Webhook confere o header `X-Telegram-Bot-Api-Secret-Token` com comparação de tempo constante.
@@ -70,7 +70,7 @@ Exemplo combinado para colar no campo **Rules** do RTDB:
 ## Passo 5 — publicar na Vercel
 
 1. Importe o repositório na Vercel. O framework pode ficar como Other; use `npm install` como instalação e não é necessário build estático.
-2. `vercel.json` usa o builder Node da Vercel para mapear o arquivo raiz `telegram.js` ao endpoint `/api/telegram` e inclui as imagens da raiz. A função pede até 60 segundos; o máximo real é o limite do plano/runtime da sua conta. Se o plano não permitir essa duração, reduza os timeouts ou use worker/filas externos.
+2. `vercel.json` utiliza `builds` sem o campo incompatível `functions`; usa o builder Node da Vercel para mapear o arquivo raiz `telegram.js` ao endpoint `/api/telegram` e inclui as imagens da raiz. O tempo máximo é definido pela configuração do projeto e pelos limites do plano/runtime da conta. Se o plano não permitir essa duração, reduza os timeouts ou use worker/filas externos.
 3. Em Project → Settings → Environment Variables, adicione as variáveis descritas em `.env.example` para Production (e Preview se necessário), sem aspas extras salvo se fizerem parte do JSON.
 4. Faça deploy e anote a URL HTTPS do projeto.
 
@@ -122,7 +122,7 @@ Os testes unitários são locais e não acessam serviços externos. Após deploy
 
 ## Testes nesta entrega
 
-- Testes locais de formato da Key, lista das dez durações, controle de admin, correspondência do ID, ativação e timestamp de vencimento, pausa/retomada, reset, expiração e formatação do restante.
+- Testes locais de formato da Key de 6 dígitos (com compatibilidade com 16 dígitos), lista das dez durações, controle de admin, correspondência do ID, ativação e timestamp de vencimento, pausa/retomada, reset, expiração e formatação do restante.
 - Checagem sintática Node para a aplicação.
 - **Não executados sem credenciais:** integração real com Telegram, Firebase, APIs de texto/imagem, webhook registrado, validação de deployment na sua conta Vercel, Android/iOS/Telegram Web. A imagem tutorial é a captura fornecida pelo usuário; o botão “MOSTRAR MEU ID” usa o ID do próprio callback de Telegram.
 
@@ -145,3 +145,16 @@ Os testes unitários são locais e não acessam serviços externos. Após deploy
 - Revoke/delete é lógico e mantém registro mínimo; o acesso é revogado imediatamente. Reset é ação distinta e reabre a licença.
 - Este pacote não cria sozinho suas contas, não compra créditos, não publica no seu Vercel/Firebase e não armazena dados secretos.
 - Para tráfego grande, estatísticas consultam dados reais do RTDB e a função precisa de índices/capacidade adequados. Considere agregados e filas dedicados antes de escalar.
+
+## Correção de 13/10/2026 — ativação por ID e Firebase
+
+- A Key nova é numérica com 6 dígitos, por exemplo `004218`. **Os zeros iniciais são parte da Key**.
+- O botão `📋 COPIAR KEY` usa a função `copy_text` do Telegram. O comando `/id` e o botão `📋 COPIAR MEU ID` usam o `from.id` real, e não um número inventado.
+- A Key permanece `available` no Realtime Database até o ID ser confirmado e a transação de ativação concluir. A data de vencimento é calculada só nesse instante.
+- É possível informar outro ID. O bot envia solicitação para a conversa privada desse ID; o destinatário precisa já ter dado `/start` no MestreXit.ia e **confirmar no próprio Telegram**. A solicitação vence em 15 minutos. Sem aceite, nenhuma validade começa.
+- A função de copiar/mostrar ID não aciona ativação.
+- `firebase.js` usa `getApps()/initializeApp()/getDatabase()` do Firebase Admin modular, evitando o erro `Cannot read properties of undefined (reading 'length')` observado anteriormente.
+- `vercel.json` não mistura `builds` e `functions` (erro de deploy anterior).
+- O Realtime Database existente NÃO é apagado nem recriado. Os nós `activationRequests` e `activation` são criados automaticamente no servidor pelo Firebase Admin. `database.rules.json` não é publicado automaticamente no Firebase apenas por estar no GitHub. Como as regras atuais negam acessos de clientes e o bot usa Admin SDK, **não é necessário alterar as regras para essa funcionalidade**.
+- Se o repositório GitHub tiver correções posteriores à versão original deste ZIP, compare-as antes de substituir todos os arquivos; o ZIP base enviado ainda tinha `firebase.js` e `vercel.json` antigos.
+- Testes ao vivo de Firebase/Telegram não foram realizados sem acesso às credenciais.

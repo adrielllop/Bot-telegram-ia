@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ADMIN_ID, DURATIONS, activateKey, formatRemaining, isAdmin, licenseStatus,
-  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId
+  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId
 } from './core.js';
 
 test('as dez durações especificadas são preservadas', () => {
@@ -10,10 +10,20 @@ test('as dez durações especificadas são preservadas', () => {
   assert.deepEqual(Object.values(DURATIONS).map(x => x.label), ['1 HORA','6 HORAS','1 DIA','3 DIAS','7 DIAS','10 DIAS','15 DIAS','30 DIAS','60 DIAS','90 DIAS']);
 });
 
-test('gerador aceita somente Keys de 16 dígitos', () => {
+test('Keys novas de 6 dígitos e antigas de 16 continuam válidas', () => {
+  assert.equal(validKeyFormat('005349'), true);
   assert.equal(validKeyFormat('7836491058273640'), true);
   assert.equal(validKeyFormat('783649105827364'), false);
+  assert.equal(validKeyFormat('12345'), false);
+  assert.equal(validKeyFormat('1234567'), false);
   assert.equal(validKeyFormat('783649105827364x'), false);
+});
+
+test('ID numérico do Telegram é validado sem confundir com Key', () => {
+  assert.equal(validTelegramId('1234567890'), true);
+  assert.equal(validTelegramId('12345'), true);
+  assert.equal(validTelegramId('1234'), false);
+  assert.equal(validTelegramId('a12345678'), false);
 });
 
 test('confirmação manual precisa coincidir com ID real', () => {

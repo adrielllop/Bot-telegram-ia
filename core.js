@@ -16,12 +16,18 @@ export function isAdmin(telegramUserId) {
   return String(telegramUserId ?? '') === ADMIN_ID;
 }
 
+// New licences use six digits; legacy 16-digit licences remain valid.
 export function validKeyFormat(value) {
-  return typeof value === 'string' && /^\d{16}$/.test(value);
+  return typeof value === 'string' && /^(?:\d{6}|\d{16})$/.test(value);
 }
 
+export function validTelegramId(value) {
+  return /^\d{5,15}$/.test(String(value ?? '').trim());
+}
+
+
 export function validManualId(value, realTelegramId) {
-  return /^\d{5,15}$/.test(String(value ?? '').trim()) && String(value).trim() === String(realTelegramId);
+  return validTelegramId(value) && String(value).trim() === String(realTelegramId);
 }
 
 export function licenseStatus(key, now = Date.now()) {

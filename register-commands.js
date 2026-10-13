@@ -3,6 +3,7 @@ if (!token) throw new Error('Defina TELEGRAM_BOT_TOKEN antes de executar.');
 const commands = [
   { command: 'start', description: 'Abrir apresentação e menu' },
   { command: 'key', description: 'Ativar ou inserir uma Key' },
+  { command: 'id', description: 'Mostrar e copiar meu ID do Telegram' },
   { command: 'ia', description: 'Conversar com MestreXit.ia' },
   { command: 'imagem', description: 'Gerar imagem com IA' },
   { command: 'status', description: 'Consultar validade da licença' },

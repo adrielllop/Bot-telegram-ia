@@ -1,15 +1,18 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, randomBytes } from 'node:crypto';
 import { database, paths, appendAdminAction } from './firebase.js';
 import { answerCallback, sendChatAction, sendMessage, sendPhotoAsset, sendPhotoBytes } from './telegram-api.js';
 import {
   ADMIN_ID, DURATIONS, activateKey, formatDate, formatRemaining, isAdmin, licenseStatus,
-  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId
+  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId
 } from './core.js';
 
 const SEP = '━━━━━━━━━━━━━━━━━━';
 const keyboard = rows => ({ inline_keyboard: rows });
+const copyButton = (label, value) => ({ text: label, copy_text: { text: String(value) } });
+const ACTIVATION_REQUEST_TTL_MS = 15 * 60 * 1000;
 const mainKeyboard = () => keyboard([
   [{ text: '🔑 INSERIR KEY', callback_data: 'u:key' }],
+  [{ text: '🆔 MOSTRAR MEU ID', callback_data: 'u:showid' }],
   [{ text: '👑 PAINEL ADM', callback_data: 'a:home' }]
 ]);
 const adminKeyboard = () => keyboard([
@@ -54,44 +57,159 @@ async function checkKeyAttempts(db, userId) {
   return result.committed;
 }
 
+async function showMyId(chatId, user) {
+  // Never trust a number typed by a user to identify their Telegram account.
+  // A callback's from.id is the authoritative account identity.
+  return sendMessage(chatId,
+    `🆔 SEU ID DO TELEGRAM\n\n${user.id}\n\nToque no botão abaixo para copiar. Depois envie o número no chat para confirmar a ativação.`,
+    { reply_markup: keyboard([[copyButton('📋 COPIAR MEU ID', user.id)]]) });
+}
+
 async function requestId(chatId, user, db, keyValue) {
   await setState(db, user.id, { stage: 'await_id', key: keyValue });
-  const caption = `👑 𝗠𝗘𝗦𝗧𝗥𝗘𝗫𝗜𝗧.𝗜𝗔\n\n${SEP}\n\n✅ SUA KEY FOI VALIDADA!\n\n🔐 Agora precisamos confirmar seu ID do Telegram para vincular sua licença.\n\n🆔 ENVIE SEU ID DO TELEGRAM\n\n❓ Não sabe qual é seu ID?\n\n⚡ É muito simples!\n\n1️⃣ Acesse o bot: https://t.me/userinfo3bot\n2️⃣ Clique em INICIAR.\n3️⃣ Copie seu número de ID.\n4️⃣ Volte aqui e envie o número.\n\n📸 Veja na imagem onde copiar o ID!\n\n${SEP}`;
-  return sendPhotoAsset(chatId, 'tutorial-id.png', { caption, reply_markup: keyboard([[{ text: '🆔 MOSTRAR MEU ID', callback_data: 'u:showid' }]]) });
+  const caption = `👑 𝗠𝗘𝗦𝗧𝗥𝗘𝗫𝗜𝗧.𝗜𝗔\n\n${SEP}\n\n✅ KEY VALIDADA! (AINDA NÃO ATIVADA)\n\n🔐 A contagem só começa depois da confirmação do ID e da ativação no Firebase.\n\n🆔 ENVIE O ID DO TELEGRAM QUE RECEBERÁ A LICENÇA.\n\n✅ Para ativar na sua própria conta, copie seu ID no botão abaixo e envie o número aqui.\n\n👥 Se enviar o ID de outra pessoa, essa pessoa precisará abrir o bot e autorizar a ativação no próprio Telegram.\n\n📸 Você também pode obter o ID no bot https://t.me/userinfo3bot.\n\n${SEP}`;
+  return sendPhotoAsset(chatId, 'tutorial-id.png', { caption, reply_markup: keyboard([
+    [copyButton('📋 COPIAR MEU ID', user.id)],
+    [{ text: '🆔 MOSTRAR MEU ID', callback_data: 'u:showid' }],
+    [{ text: '🔙 RECOMEÇAR', callback_data: 'u:key' }]
+  ]) });
 }
 
 async function activate(db, chatId, user, keyValue) {
-  if (!validKeyFormat(keyValue)) return sendMessage(chatId, '❌ KEY INVÁLIDA!\n\n🔑 Confira os números e tente novamente.');
-  const now = Date.now();
-  const keyRef = db.ref(`${paths.keys}/${keyValue}`);
-  const before = (await keyRef.get()).val();
-  if (!before || before.status !== 'available' || before.deletedAt) {
-    await clearState(db, user.id);
-    return sendMessage(chatId, '❌ Esta Key não está disponível para ativação. Confira os números ou solicite outra Key.');
+  if (!validKeyFormat(keyValue)) {
+    return sendMessage(chatId, '❌ Formato da Key inválido. Use uma Key de 6 dígitos ou uma Key antiga de 16 dígitos.');
   }
+  const keyRef = db.ref(`${paths.keys}/${keyValue}`);
+  let latest = (await keyRef.get()).val();
+  if (!latest || latest.deletedAt || latest.status === 'revoked') {
+    return sendMessage(chatId, '❌ Key inexistente ou revogada. Confira os números.');
+  }
+  if (latest.status === 'active' && String(latest.userId) !== String(user.id)) {
+    return sendMessage(chatId, '❌ Esta Key já está ativada em outra conta.');
+  }
+  if (latest.status !== 'available' && !(latest.status === 'active' && String(latest.userId) === String(user.id))) {
+    return sendMessage(chatId, '❌ Esta Key não está disponível para ativação.');
+  }
+  if (latest.status === 'active' && Number(latest.expiresAt) <= Date.now()) {
+    return sendMessage(chatId, '⌛ Esta Key já expirou. Solicite uma nova licença.');
+  }
+
   const userRef = db.ref(`${paths.users}/${user.id}`);
   const existing = (await userRef.get()).val();
   if (existing?.licenseKey && existing.licenseKey !== keyValue && existing.accessActive) {
-    return sendMessage(chatId, 'ℹ️ Você já possui uma licença ativa. Consulte /status antes de inserir outra Key.');
+    const previous = (await db.ref(`${paths.keys}/${existing.licenseKey}`).get()).val();
+    if (licenseStatus(previous) === 'active' && String(previous?.userId) === String(user.id)) {
+      return sendMessage(chatId, 'ℹ️ Esta conta já possui outra licença ativa. Consulte /status antes de ativar outra.');
+    }
   }
-  let activated = null;
-  const activationResult = await keyRef.transaction(current => {
-    const next = activateKey(current, user, now);
-    return next || undefined;
+
+  // Reserve the target account to prevent concurrent activations of different keys.
+  const now = Date.now();
+  const reservation = await userRef.transaction(current => {
+    const row = current || {};
+    if (row.pendingLicenseKey && row.pendingLicenseKey !== keyValue &&
+        now - Number(row.pendingActivationAt || 0) < 120000) return;
+    if (row.accessActive && row.licenseKey && row.licenseKey !== keyValue &&
+        Number(row.expiresAt || 0) > now) return;
+    return { ...row, pendingLicenseKey: keyValue, pendingActivationAt: now };
   });
-  if (activationResult.committed) activated = activationResult.snapshot.val();
-  const latest = (await keyRef.get()).val();
-  // A same-user retry repairs the user pointer if the function stopped after the key transaction.
-  if (!activated && latest?.status === 'active' && String(latest.userId) === String(user.id)) activated = latest;
-  if (!activated) {
-    await clearState(db, user.id);
-    return sendMessage(chatId, '❌ Esta Key acabou de ser ativada por outra conta ou não está mais disponível.');
+  if (!reservation.committed) {
+    return sendMessage(chatId, '⏳ Esta conta já possui licença ativa ou há outra ativação em andamento.');
   }
-  const expiresAt = Number(activated.expiresAt || now + Number(activated.durationMs));
-  await userRef.update({ telegramId: String(user.id), username: user.username || null, firstName: user.first_name || null, licenseKey: keyValue, accessActive: true, activatedAt: activated.activatedAt || now, expiresAt, updatedAt: Date.now() });
-  await clearState(db, user.id);
-  const text = `👑 𝗔𝗖𝗘𝗦𝗦𝗢 𝗟𝗜𝗕𝗘𝗥𝗔𝗗𝗢!\n\n${SEP}\n\n✅ KEY ATIVADA COM SUCESSO!\n\n🤖 Bem-vindo ao MestreXit.ia!\n\n🔑 Key: ${keyValue}\n🆔 ID vinculado: ${user.id}\n⏳ Validade: ${activated.durationLabel || formatRemaining(activated.durationMs)}\n📅 Vencimento: ${formatDate(expiresAt)}\n🟢 Status: ATIVA\n\n${SEP}\n\n⚡ 𝗦𝗨𝗔 𝗜𝗔 𝗘𝗦𝗧Á 𝗣𝗥𝗢𝗡𝗧𝗔!\n\n💬 Digite "/ia" para conversar.\n🎨 Digite "/imagem" para gerar imagens.\n\n👑 Aproveite sua experiência com o MestreXit.ia!`;
-  return sendMessage(chatId, text);
+
+  let activated = null;
+  try {
+    const activationResult = await keyRef.transaction(current => activateKey(current, user, now) || undefined);
+    if (activationResult.committed) activated = activationResult.snapshot.val();
+    latest = (await keyRef.get()).val();
+    // Idempotent recovery if the first transaction succeeded but another step failed.
+    if (!activated && latest?.status === 'active' && String(latest.userId) === String(user.id)) activated = latest;
+    if (!activated) {
+      if (latest?.status === 'active' && String(latest.userId) !== String(user.id)) {
+        return sendMessage(chatId, '❌ Esta Key foi ativada em outra conta antes da confirmação.');
+      }
+      return sendMessage(chatId, '❌ Não foi possível ativar a Key. Verifique o status ou solicite outra Key.');
+    }
+    const expiresAt = Number(activated.expiresAt);
+    if (expiresAt <= Date.now()) return sendMessage(chatId, '⌛ Esta licença já está expirada.');
+    await userRef.update({ telegramId: String(user.id), username: user.username || null,
+      firstName: user.first_name || null, licenseKey: keyValue, accessActive: true,
+      activatedAt: activated.activatedAt, expiresAt, pendingLicenseKey: null,
+      pendingActivationAt: null, updatedAt: Date.now() });
+    await clearState(db, user.id);
+    const text = `👑 𝗔𝗖𝗘𝗦𝗦𝗢 𝗟𝗜𝗕𝗘𝗥𝗔𝗗𝗢!\n\n${SEP}\n\n✅ KEY ATIVADA COM SUCESSO!\n\n🔑 Key: ${keyValue}\n🆔 ID vinculado: ${user.id}\n⏳ Validade: ${activated.durationLabel || formatRemaining(activated.durationMs)}\n📅 Vencimento: ${formatDate(expiresAt)}\n🟢 Status: ATIVA\n\n💬 Use /ia e 🎨 /imagem para aproveitar a licença.`;
+    return sendMessage(chatId, text);
+  } finally {
+    // Leave an activated user's link intact; only release a failed reservation.
+    const snapshot = (await userRef.get()).val();
+    if (snapshot?.pendingLicenseKey === keyValue) {
+      await userRef.update({ pendingLicenseKey: null, pendingActivationAt: null });
+    }
+  }
+}
+
+async function requestApproval(db, chatId, requester, keyValue, targetId) {
+  // Limit repeated requests even after a single valid Key has passed validation.
+  if (!await checkKeyAttempts(db, requester.id)) {
+    return sendMessage(chatId, '⏳ Muitas solicitações de ativação. Aguarde alguns minutos antes de tentar novamente.');
+  }
+  // Never activate somebody else's account solely from an ID typed into chat.
+  // Telegram verifies the identity when the destination account presses a button.
+  const requestId = randomBytes(12).toString('hex');
+  const ref = db.ref(`${paths.activationRequests}/${targetId}/${requestId}`);
+  await ref.set({ key: keyValue, requestedBy: String(requester.id), targetId,
+    createdAt: Date.now(), expiresAt: Date.now() + ACTIVATION_REQUEST_TTL_MS,
+    status: 'pending' });
+  try {
+    await sendMessage(targetId,
+      `🔐 CONFIRMAÇÃO DE LICENÇA MESTREXIT.IA\n\nUm usuário solicitou ativar a Key ${keyValue} na SUA conta (ID ${targetId}).\n\nA validade só começará se você confirmar. Se não reconhecer a solicitação, recuse.\n\n⏳ Solicitação válida por 15 minutos.`,
+      { reply_markup: keyboard([[
+        { text: '✅ CONFIRMAR NA MINHA CONTA', callback_data: `u:approve:${requestId}` },
+        { text: '❌ RECUSAR', callback_data: `u:deny:${requestId}` }
+      ]]) });
+  } catch (error) {
+    await ref.remove();
+    console.error('activation_request_delivery_failed', error.message);
+    return sendMessage(chatId, '⚠️ Não consegui enviar a confirmação para esse ID. A pessoa precisa primeiro abrir uma conversa privada com o MestreXit.ia e enviar /start. Depois, envie o ID novamente. A Key ainda não foi ativada.');
+  }
+  await clearState(db, requester.id);
+  return sendMessage(chatId, `📩 Enviamos a solicitação ao ID ${targetId}.\n\nA pessoa deverá confirmar no próprio Telegram em até 15 minutos. ⏳ O tempo da Key ainda NÃO começou a contar.`);
+}
+
+async function decideApproval(db, chatId, user, requestId, approve) {
+  if (!/^[a-f0-9]{24}$/.test(requestId)) return sendMessage(chatId, 'Solicitação inválida.');
+  const ref = db.ref(`${paths.activationRequests}/${user.id}/${requestId}`);
+  const snapshot = (await ref.get()).val();
+  if (!snapshot || snapshot.status !== 'pending') return sendMessage(chatId, 'Esta solicitação não está pendente.');
+  if (Number(snapshot.expiresAt) <= Date.now()) {
+    await ref.remove();
+    return sendMessage(chatId, '⌛ A solicitação expirou. Peça uma nova ativação.');
+  }
+  if (String(snapshot.targetId) !== String(user.id)) return sendMessage(chatId, 'Essa solicitação não pertence à sua conta.');
+  const claimed = await ref.transaction(current => {
+    if (!current || current.status !== 'pending' || Number(current.expiresAt) <= Date.now()) return;
+    return { ...current, status: approve ? 'processing' : 'denied', updatedAt: Date.now() };
+  });
+  if (!claimed.committed) return sendMessage(chatId, 'A solicitação já foi utilizada ou expirou.');
+  if (!approve) {
+    await sendMessage(chatId, '❌ Você recusou a ativação. Nenhuma licença foi ativada.');
+    await sendMessage(snapshot.requestedBy, `❌ O ID ${user.id} recusou a ativação da Key ${snapshot.key}.`).catch(() => {});
+    return;
+  }
+  try {
+    await activate(db, chatId, user, snapshot.key);
+    const checkedKey = (await db.ref(`${paths.keys}/${snapshot.key}`).get()).val();
+    if (checkedKey?.status === 'active' && String(checkedKey.userId) === String(user.id)) {
+      await ref.update({ status: 'completed', completedAt: Date.now() });
+      await sendMessage(snapshot.requestedBy,
+        `✅ O ID ${user.id} confirmou e ativou a Key ${snapshot.key}. A validade começou agora.`).catch(() => {});
+    } else {
+      await ref.update({ status: 'failed', failedAt: Date.now() });
+    }
+  } catch (error) {
+    await ref.update({ status: 'pending', lastErrorAt: Date.now() });
+    throw error;
+  }
 }
 
 async function access(db, userId) {
@@ -223,13 +341,13 @@ async function startGeneration(db, chatId, user) {
 
 async function createKeys(db, chatId, user, durationId, quantity) {
   const duration = DURATIONS[durationId];
-  const max = Math.min(100, Math.max(1, Number(process.env.MAX_KEYS_PER_GENERATION || 20)));
+  const max = Math.min(20, Math.max(1, Number(process.env.MAX_KEYS_PER_GENERATION || 6)));
   if (!duration || !Number.isInteger(quantity) || quantity < 1 || quantity > max) return sendMessage(chatId, `❌ Quantidade inválida. Informe um número de 1 a ${max}.`);
   const created = [];
   for (let i = 0; i < quantity; i++) {
     let saved = false;
     for (let attempt = 0; attempt < 8 && !saved; attempt++) {
-      const keyValue = Array.from({ length: 16 }, () => randomInt(0, 10)).join('');
+      const keyValue = String(randomInt(0, 1_000_000)).padStart(6, '0');
       const ref = db.ref(`${paths.keys}/${keyValue}`);
       const record = { key: keyValue, status: 'available', durationId, durationLabel: duration.label, durationMs: duration.ms, createdAt: Date.now(), createdBy: String(user.id) };
       const result = await ref.transaction(current => current ? undefined : record);
@@ -238,7 +356,7 @@ async function createKeys(db, chatId, user, durationId, quantity) {
     if (!saved) throw new Error('Não foi possível reservar uma Key única após várias tentativas.');
   }
   await appendAdminAction(db, user.id, 'generate_keys', { durationId, quantity, keys: created.map(item => item.key) });
-  for (const item of created) await sendMessage(chatId, `👑 KEY GERADA!\n\n${SEP}\n\n🔑 KEY: "${item.key}"\n⏳ DURAÇÃO: ${item.durationLabel}\n🟢 STATUS: DISPONÍVEL\n📅 CRIAÇÃO: ${formatDate(item.createdAt)}\n\n${SEP}`);
+  for (const item of created) await sendMessage(chatId, `👑 KEY GERADA!\n\n${SEP}\n\n🔑 KEY: ${item.key}\n⏳ DURAÇÃO: ${item.durationLabel}\n🟢 STATUS: DISPONÍVEL\n📅 CRIAÇÃO: ${formatDate(item.createdAt)}\n\n${SEP}`, { reply_markup: keyboard([[copyButton('📋 COPIAR KEY', item.key)]]) });
   await setState(db, user.id, { stage: 'admin_home' });
 }
 
@@ -268,7 +386,7 @@ async function showKey(db, chatId, keyValue) {
   if (!key) return sendMessage(chatId, 'Key não encontrada.');
   const status = licenseStatus(key);
   const text = `🔑 KEY: ${keyValue}\n📅 Criada: ${formatDate(key.createdAt)}\n⏳ Duração: ${key.durationLabel || formatRemaining(key.durationMs)}\n📊 Status: ${statusLabel(status)}\n🆔 ID: ${key.userId || '—'}\n👤 Username: ${key.username ? '@' + key.username : '—'}\n✅ Ativada: ${formatDate(key.activatedAt)}\n⌛ Restante: ${status === 'active' || status === 'paused' ? formatRemaining(remainingMs(key)) : '—'}\n📅 Vencimento: ${formatDate(key.expiresAt)}`;
-  const rows = [];
+  const rows = [[copyButton('📋 COPIAR KEY', keyValue)]];
   if (status === 'active') rows.push([{ text: '⏸ PAUSAR KEY', callback_data: `o:pause:${keyValue}` }]);
   if (status === 'paused') rows.push([{ text: '▶️ RETOMAR KEY', callback_data: `o:resume:${keyValue}` }]);
   if (status !== 'revoked') rows.push([{ text: '🔄 RESETAR KEY', callback_data: `x:reset:${keyValue}` }, { text: '🗑 EXCLUIR KEY', callback_data: `x:delete:${keyValue}` }]);
@@ -343,7 +461,7 @@ async function showAdmin(chatId, user) {
 }
 
 async function help(chatId) {
-  return sendMessage(chatId, `👑 MESTREXIT.IA — AJUDA\n\n/key — ativar uma Key\n/ia sua pergunta — conversar com a IA\n/imagem descrição — gerar uma imagem\n/status — consultar licença\n/limpar — apagar seu histórico de conversa\n/admin — painel administrativo autorizado\n/start — apresentação e menu\n\nApós ativar uma licença, você também pode enviar mensagens normalmente.`);
+  return sendMessage(chatId, `👑 MESTREXIT.IA — AJUDA\n\n/key — ativar uma Key\n/id — mostrar e copiar seu ID\n/ia sua pergunta — conversar com a IA\n/imagem descrição — gerar uma imagem\n/status — consultar licença\n/limpar — apagar seu histórico de conversa\n/admin — painel administrativo autorizado\n/start — apresentação e menu\n\nApós ativar uma licença, você também pode enviar mensagens normalmente.`);
 }
 
 async function status(chatId, userId, db) {
@@ -364,6 +482,7 @@ async function handleMessage(db, message) {
   const arg = command?.[2] || '';
   if (name === 'start') return home(chatId);
   if (name === 'key') return beginKey(chatId, user.id, db);
+  if (name === 'id' || name === 'meuid') return showMyId(chatId, user);
   if (name === 'ajuda' || name === 'help') return help(chatId);
   if (name === 'status') return status(chatId, user.id, db);
   if (name === 'admin') return showAdmin(chatId, user);
@@ -384,14 +503,15 @@ async function handleMessage(db, message) {
   const current = await state(db, user.id);
   if (current.stage === 'await_key') {
     if (!await checkKeyAttempts(db, user.id)) return sendMessage(chatId, '⏳ Muitas tentativas. Aguarde alguns minutos antes de tentar novamente.');
-    if (!validKeyFormat(raw)) return sendMessage(chatId, '❌ KEY INVÁLIDA!\n\n🔑 Informe os 16 dígitos numéricos da Key.');
+    if (!validKeyFormat(raw)) return sendMessage(chatId, '❌ KEY INVÁLIDA!\n\n🔑 Informe 6 dígitos numéricos (ou 16, se for uma Key antiga).');
     const key = (await db.ref(`${paths.keys}/${raw}`).get()).val();
     if (!key || key.status !== 'available' || key.deletedAt) return sendMessage(chatId, '❌ KEY INVÁLIDA OU INDISPONÍVEL!\n\n🔑 Confira os números e tente novamente.');
     return requestId(chatId, user, db, raw);
   }
   if (current.stage === 'await_id') {
-    if (!validManualId(raw, user.id)) return sendMessage(chatId, '❌ O ID informado não corresponde à sua conta real do Telegram. Envie o número do seu próprio ID para continuar.');
-    return activate(db, chatId, user, current.key);
+    if (!validTelegramId(raw)) return sendMessage(chatId, '❌ ID inválido. Envie apenas o número do ID do Telegram (de 5 a 15 dígitos).');
+    if (validManualId(raw, user.id)) return activate(db, chatId, user, current.key);
+    return requestApproval(db, chatId, user, current.key, raw);
   }
   if (current.stage === 'await_quantity') {
     if (!isAdmin(user.id)) return sendMessage(chatId, '🚫 Acesso negado.');
@@ -421,11 +541,9 @@ async function handleCallback(db, callback) {
   }
   await answerCallback(callback.id);
   if (data === 'u:key') return beginKey(chatId, user.id, db);
-  if (data === 'u:showid') {
-    const current = await state(db, user.id);
-    if (current.stage !== 'await_id' || !validKeyFormat(current.key)) return sendMessage(chatId, 'Nenhuma ativação está aguardando confirmação. Use /key para começar.');
-    return activate(db, chatId, user, current.key);
-  }
+  if (data === 'u:showid') return showMyId(chatId, user);
+  if (data.startsWith('u:approve:')) return decideApproval(db, chatId, user, data.slice('u:approve:'.length), true);
+  if (data.startsWith('u:deny:')) return decideApproval(db, chatId, user, data.slice('u:deny:'.length), false);
   if (data === 'u:home') return home(chatId);
   if (data === 'a:home') return showAdmin(chatId, user);
   if (data === 'a:gen') return startGeneration(db, chatId, user);
@@ -435,7 +553,7 @@ async function handleCallback(db, callback) {
     const durationId = data.slice(4);
     if (!DURATIONS[durationId]) return sendMessage(chatId, 'Duração inválida.');
     await setState(db, user.id, { stage: 'await_quantity', durationId });
-    return sendMessage(chatId, `⏱ Duração: ${DURATIONS[durationId].label}\n\nQuantas Keys deseja gerar? Informe um número entre 1 e ${process.env.MAX_KEYS_PER_GENERATION || 20}.`);
+    return sendMessage(chatId, `⏱ Duração: ${DURATIONS[durationId].label}\n\nQuantas Keys deseja gerar? Informe um número entre 1 e ${Math.min(20, Number(process.env.MAX_KEYS_PER_GENERATION || 6))}.`);
   }
   if (data.startsWith('l:')) {
     const [, filter = 'all', cursor = ''] = data.split(':');
