@@ -527,21 +527,26 @@ async function listKeys(db, chatId, filter, cursor = '', origin = null) {
 
 async function showKey(db, chatId, keyValue, origin = null, notice = '') {
   const key = (await db.ref(`${paths.keys}/${keyValue}`).get()).val();
-  if (!key) return sendMessage(chatId, 'Key não encontrada.');
+  if (!key) return showPanel(chatId, '🗑️ Esta Key não existe mais no Firebase. Ela pode ter sido excluída.', [
+    { text: '🔙 LISTA DE KEYS', callback_data: 'l:all:' },
+    { text: '👑 PAINEL ADM', callback_data: 'a:home' }
+  ], origin);
   const status = licenseStatus(key);
   const text = `🔑 KEY: ${keyValue}\n📅 Criada: ${formatDate(key.createdAt)}\n⏳ Duração: ${key.durationLabel || formatRemaining(key.durationMs)}\n📊 Status: ${statusLabel(status)}\n🆔 ID: ${key.userId || '—'}\n👤 Username: ${key.username ? '@' + key.username : '—'}\n✅ Ativada: ${formatDate(key.activatedAt)}\n⌛ Restante: ${status === 'active' || status === 'paused' ? formatRemaining(remainingMs(key)) : '—'}\n📅 Vencimento: ${formatDate(key.expiresAt)}`;
   const rows = [[copyButton('📋 COPIAR KEY', keyValue)]];
   if (status === 'active') rows.push([{ text: '⏸ PAUSAR KEY', callback_data: `o:pause:${keyValue}` }]);
   if (status === 'paused') rows.push([{ text: '▶️ RETOMAR KEY', callback_data: `o:resume:${keyValue}` }]);
   if (status !== 'revoked') rows.push([{ text: '🔄 RESETAR KEY', callback_data: `x:reset:${keyValue}` }, { text: '🗑 EXCLUIR KEY', callback_data: `x:delete:${keyValue}` }]);
+  else rows.push([{ text: '🗑 EXCLUIR DEFINITIVAMENTE', callback_data: `x:delete:${keyValue}` }]);
   rows.push([{ text: '🔙 LISTA', callback_data: 'l:all:' }, { text: 'PAINEL ADM', callback_data: 'a:home' }]);
   const body = notice ? `${notice}\n\n${text}` : text;
   return showPanel(chatId, body, rows, origin);
 }
 
 async function confirmKeyAction(db, chatId, user, action, keyValue, origin = null) {
-  const verb = action === 'reset' ? 'resetar' : 'revogar';
-  const text = `⚠️ Confirma que deseja ${verb} a Key ${keyValue}?\n\nAo excluir, a Key será revogada no Firebase e deixará de funcionar. O registro será mantido para auditoria.`;
+  const text = action === 'delete'
+    ? `⚠️ EXCLUSÃO DEFINITIVA\n\nDeseja apagar a Key ${keyValue} também do Firebase Realtime Database?\n\n❌ Ela desaparecerá de /keys e da Lista de Keys.\n🔒 Se estiver ativa, o acesso do usuário será encerrado.\n⚠️ Esta ação não pode ser desfeita. Um registro administrativo mínimo ficará em /adminActions.`
+    : `⚠️ RESETAR KEY\n\nDeseja resetar a Key ${keyValue}? A mesma Key ficará disponível para nova ativação e o vínculo anterior será encerrado.`;
   const extra = { reply_markup: keyboard([[{ text: '✅ CONFIRMAR', callback_data: `c:${action}:${keyValue}` }, { text: '❌ CANCELAR', callback_data: `k:${keyValue}` }]]) };
   return showPanel(chatId, text, extra.reply_markup.inline_keyboard, origin);
 }
@@ -550,22 +555,51 @@ async function mutateKey(db, chatId, user, action, keyValue, origin = null) {
   const ref = db.ref(`${paths.keys}/${keyValue}`);
   const snap = await ref.get();
   const old = snap.val();
-  if (!old) return showPanel(chatId, 'Key não encontrada.', [backAdmin], origin);
-  if (action === 'pause' || action === 'resume' || action === 'reset' || action === 'delete') {
+  if (!old) return showPanel(chatId, '🗑️ Essa Key já não existe no Firebase.', [
+    { text: '🔙 LISTA DE KEYS', callback_data: 'l:all:' },
+    { text: '👑 PAINEL ADM', callback_data: 'a:home' }
+  ], origin);
+
+  // EXCLUIR significa APAGAR O NÓ no Firebase, não apenas marcar "revoked".
+  // A transação evita que outra operação de ativação restaure o registro
+  // durante a exclusão. O histórico do evento vai para /adminActions.
+  if (action === 'delete') {
+    const now = Date.now();
+    const deleted = await ref.transaction(() => null, undefined, false);
+    if (!deleted.committed) {
+      return showPanel(chatId, '⚠️ Não foi possível excluir a Key do Firebase. Tente novamente.', [backAdmin], origin);
+    }
+    // Se pertencia a alguém, retirar o vínculo da conta sem excluir o usuário.
+    // Nunca desativar uma licença MAIS NOVA pertencente à mesma conta.
+    if (old.userId) {
+      const ownerRef = db.ref(`${paths.users}/${old.userId}`);
+      const owner = (await ownerRef.get()).val();
+      if (owner && String(owner.licenseKey) === String(keyValue)) {
+        await ownerRef.update({ licenseKey: null, accessActive: false, expiresAt: null,
+          pendingLicenseKey: null, pendingActivationAt: null, updatedAt: now });
+      }
+    }
+    await appendAdminAction(db, user.id, 'delete_permanently', {
+      key: keyValue, previousStatus: old.status || 'unknown',
+      previousUserId: old.userId ? String(old.userId) : null
+    });
+    return showPanel(chatId,
+      `✅ KEY ${keyValue} EXCLUÍDA DEFINITIVAMENTE!\n\n🗑️ Removida de /keys no Firebase.\n📋 Não aparecerá mais na Lista de Keys.\n🔒 Se havia licença vinculada a ela, o acesso foi desativado.\n🧾 Somente o registro da ação administrativa foi preservado.`,
+      [{ text: '📋 LISTA DE KEYS', callback_data: 'l:all:' },
+       { text: '👑 PAINEL ADM', callback_data: 'a:home' }], origin);
+  }
+
+  if (action === 'pause' || action === 'resume' || action === 'reset') {
     const now = Date.now();
     const result = await ref.transaction(current => {
       if (!current) return;
       if (action === 'pause') return pauseKey(current, now) || undefined;
       if (action === 'resume') return resumeKey(current, now) || undefined;
       if (action === 'reset') return resetKey(current, now) || undefined;
-      if (action === 'delete') {
-        if (current.deletedAt || current.status === 'revoked') return;
-        return { ...current, status: 'revoked', deletedAt: now, revokedAt: now, userId: null, username: null, remainingMs: 0, expiresAt: null, updatedAt: now };
-      }
     });
     const fresh = (await ref.get()).val();
     if (!result.committed) return showPanel(chatId, 'A ação não pôde ser aplicada ao status atual da Key.', [backAdmin], origin);
-    if (old.userId && ['pause', 'resume', 'reset', 'delete'].includes(action)) {
+    if (old.userId && ['pause', 'resume', 'reset'].includes(action)) {
       const profilePatch = action === 'pause'
         ? { accessActive: false }
         : action === 'resume'
@@ -579,7 +613,7 @@ async function mutateKey(db, chatId, user, action, keyValue, origin = null) {
       }
     }
     await appendAdminAction(db, user.id, action, { key: keyValue, previousStatus: old.status });
-    const label = { pause: 'pausada', resume: 'retomada', reset: 'resetada e liberada para nova ativação', delete: 'revogada e excluída do uso' }[action];
+    const label = { pause: 'pausada', resume: 'retomada', reset: 'resetada e liberada para nova ativação' }[action];
     const notice = `✅ Key ${label}.`;
     return showKey(db, chatId, keyValue, origin, notice);
   }
