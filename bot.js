@@ -1,6 +1,6 @@
 import { randomInt, randomBytes } from 'node:crypto';
 import { database, paths, appendAdminAction } from './firebase.js';
-import { answerCallback, deleteMessage, editMessage, sendChatAction, sendMessage, sendPhotoAsset, sendPhotoBytes } from './telegram-api.js';
+import { answerCallback, deleteMessage, editMessage, sendChatAction, sendMessage, sendPhotoAsset } from './telegram-api.js';
 import {
   ADMIN_ID, DURATIONS, activationTransactionValue, durationOfKey, formatDate, formatRemaining, isAdmin, licenseStatus,
   pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId, parseCustomDuration
@@ -61,7 +61,7 @@ async function setState(db, id, value) { await db.ref(`${paths.activation}/${id}
 async function clearState(db, id) { await db.ref(`${paths.activation}/${id}`).remove(); }
 
 async function home(chatId, user) {
-  const text = `👑 𝗠𝗘𝗦𝗧𝗥𝗘𝗫𝗜𝗧.𝗜𝗔 👑\n\n${SEP}\n\n🤖 𝗢𝗟Á, 𝗛𝗨𝗠𝗔𝗡𝗢!\n\n🔥 Seja muito bem-vindo ao meu universo!\n\n👑 Eu me chamo MestreXit.ia, sua inteligência artificial sem limites para a criatividade!\n\n🧠 Fui criado para transformar suas ideias em realidade e levar sua experiência com inteligência artificial a outro nível.\n\n⚡ 𝗢 𝗤𝗨𝗘 𝗘𝗨 𝗣𝗢𝗦𝗦𝗢 𝗙𝗔𝗭𝗘𝗥?\n\n💬 Conversar e responder suas perguntas.\n💻 Criar códigos, sites e projetos.\n🎨 Gerar imagens com inteligência artificial.\n✍️ Criar textos e conteúdos incríveis.\n🚀 Ajudar a desenvolver suas ideias.\n🧠 Explicar assuntos e resolver problemas.\n\n${SEP}\n\n🔐 𝗔𝗧𝗜𝗩𝗘 𝗦𝗘𝗨 𝗔𝗖𝗘𝗦𝗦𝗢\n\n⚡ Para despertar todo o meu poder, você precisa de uma Key válida.\n\n👑 Escolha uma opção abaixo:`;
+  const text = `👑 𝗠𝗘𝗦𝗧𝗥𝗘𝗫𝗜𝗧.𝗜𝗔 👑\n\n${SEP}\n\n🤖 𝗢𝗟Á, 𝗛𝗨𝗠𝗔𝗡𝗢!\n\n🔥 Seja muito bem-vindo ao meu universo!\n\n👑 Eu me chamo MestreXit.ia, sua inteligência artificial sem limites para a criatividade!\n\n🧠 Fui criado para transformar suas ideias em realidade e levar sua experiência com inteligência artificial a outro nível.\n\n⚡ 𝗢 𝗤𝗨𝗘 𝗘𝗨 𝗣𝗢𝗦𝗦𝗢 𝗙𝗔𝗭𝗘𝗥?\n\n💬 Conversar e responder suas perguntas.\n💻 Criar códigos, sites e projetos.\n✍️ Criar textos e conteúdos incríveis.\n🚀 Ajudar a desenvolver suas ideias.\n🧠 Explicar assuntos e resolver problemas.\n\n${SEP}\n\n🔐 𝗔𝗧𝗜𝗩𝗘 𝗦𝗘𝗨 𝗔𝗖𝗘𝗦𝗦𝗢\n\n⚡ Para despertar todo o meu poder, você precisa de uma Key válida.\n\n👑 Escolha uma opção abaixo:`;
   return sendPhotoAsset(chatId, 'logo.png', { caption: text, reply_markup: mainKeyboard(user.id) });
 }
 
@@ -182,7 +182,7 @@ async function activate(db, chatId, user, keyValue) {
       activatedAt: activated.activatedAt, expiresAt, pendingLicenseKey: null,
       pendingActivationAt: null, updatedAt: Date.now() });
     await clearState(db, user.id);
-    const text = `👑 𝗔𝗖𝗘𝗦𝗦𝗢 𝗟𝗜𝗕𝗘𝗥𝗔𝗗𝗢!\n\n${SEP}\n\n✅ KEY ATIVADA COM SUCESSO!\n\n🔑 Key: ${keyValue}\n🆔 ID vinculado: ${user.id}\n⏳ Validade: ${activated.durationLabel || formatRemaining(activated.durationMs)}\n📅 Vencimento: ${formatDate(expiresAt)}\n🟢 Status: ATIVA\n\n💬 Use /ia e 🎨 /imagem para aproveitar a licença.`;
+    const text = `👑 𝗔𝗖𝗘𝗦𝗦𝗢 𝗟𝗜𝗕𝗘𝗥𝗔𝗗𝗢!\n\n${SEP}\n\n✅ KEY ATIVADA COM SUCESSO!\n\n🔑 Key: ${keyValue}\n🆔 ID vinculado: ${user.id}\n⏳ Validade: ${activated.durationLabel || formatRemaining(activated.durationMs)}\n📅 Vencimento: ${formatDate(expiresAt)}\n🟢 Status: ATIVA\n\n💬 Use /ia para conversar ou /codigo para criar códigos e projetos.`;
     return sendMessage(chatId, text);
   } finally {
     // Leave an activated user's link intact; only release a failed reservation.
@@ -303,10 +303,10 @@ async function aiReply(db, chatId, user, prompt) {
     { role: 'user', content: prompt.slice(0, 12000) }
   ];
   try {
-    const base = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    const base = (process.env.OPENAI_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
     const response = await fetch(`${base}/chat/completions`, {
       method: 'POST', headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-4o-mini', messages, temperature: 0.7 }),
+      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'openai/gpt-oss-20b', messages, temperature: 0.7 }),
       signal: AbortSignal.timeout(Math.min(55000, Number(process.env.AI_TIMEOUT_MS || 45000)))
     });
     const data = await response.json().catch(() => ({}));
@@ -325,82 +325,8 @@ async function aiReply(db, chatId, user, prompt) {
     for (const chunk of chunks) await sendMessage(chatId, chunk);
   } catch (error) {
     console.error('ai_provider_error', error.message);
-    const msg = error.name === 'TimeoutError' || error.name === 'AbortError' ? '⌛ A resposta demorou mais que o limite do provedor. Tente novamente com uma solicitação mais curta.' : error.status === 429 ? '⚠️ O provedor de IA atingiu seu limite temporário. Tente novamente mais tarde.' : '⚠️ Não consegui acessar a IA agora. Verifique a configuração do provedor ou tente novamente em instantes.';
+    const msg = error.name === 'TimeoutError' || error.name === 'AbortError' ? '⌛ A resposta demorou mais que o limite do provedor. Tente novamente com uma solicitação mais curta.' : error.status === 429 ? '⚠️ O GroqCloud retornou limite de uso (429). Pode ser limite por minuto, por dia ou de créditos. Confira Usage/Limits no painel GroqCloud e tente novamente.' : '⚠️ Não consegui acessar a IA agora. Verifique a configuração do provedor ou tente novamente em instantes.';
     await sendMessage(chatId, msg);
-  }
-}
-
-async function reserveImage(db, userId) {
-  const limit = Math.max(0, Number(process.env.IMAGE_DAILY_LIMIT ?? 5));
-  if (!limit) return { allowed: false, limit };
-  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-  const ref = db.ref(`${paths.imageUsage}/${userId}/${day}`);
-  const result = await ref.transaction(current => {
-    const count = Number(current?.count || 0);
-    if (count >= limit) return;
-    return { count: count + 1, updatedAt: Date.now() };
-  });
-  return { allowed: result.committed, limit, usageRef: ref };
-}
-
-async function generateImage(db, chatId, user, prompt) {
-  if (!prompt.trim()) return sendMessage(chatId, '🎨 Envie uma descrição após /imagem. Exemplo: /imagem um robô dourado com coroa em estilo 3D');
-  const imageApiKey = process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY;
-  if (!imageApiKey) return sendMessage(chatId, '⚙️ Falta configurar IMAGE_API_KEY ou OPENAI_API_KEY na Vercel.');
-  const quota = await reserveImage(db, user.id);
-  if (!quota.allowed) return sendMessage(chatId, `⏳ Você atingiu o limite do BOT de ${quota.limit} imagens por dia. Tente novamente amanhã.`);
-  let progress = null;
-  let delivered = false;
-  try {
-    progress = await sendMessage(chatId, '🎨 Criando sua imagem… Aguarde.');
-    await sendChatAction(chatId, 'upload_photo').catch(() => {});
-    const timeout = Math.max(20000, Math.min(90000, Number(process.env.IMAGE_TIMEOUT_MS || 55000)));
-    const response = await fetch(process.env.IMAGE_API_URL || 'https://api.openai.com/v1/images/generations', {
-      method: 'POST', headers: { authorization: `Bearer ${imageApiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: process.env.IMAGE_MODEL || 'gpt-image-1', prompt: prompt.slice(0, 4000), n: 1, size: process.env.IMAGE_SIZE || '1024x1024', quality: process.env.IMAGE_QUALITY || 'medium' }),
-      signal: AbortSignal.timeout(timeout)
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(String(result.error?.message || `HTTP ${response.status}`).slice(0, 400));
-      error.status = response.status;
-      error.code = result.error?.code || result.error?.type || '';
-      throw error;
-    }
-    const item = result.data?.[0];
-    let bytes;
-    if (item?.b64_json) bytes = Buffer.from(item.b64_json, 'base64');
-    else if (item?.url) {
-      const imageResponse = await fetch(item.url, { signal: AbortSignal.timeout(15000) });
-      if (!imageResponse.ok) throw new Error('Não foi possível baixar a imagem retornada.');
-      bytes = Buffer.from(await imageResponse.arrayBuffer());
-    } else throw new Error('O provedor não retornou dados de imagem.');
-    const maxBytes = Number(process.env.MAX_IMAGE_BYTES || 9500000);
-    if (!bytes.length || bytes.length > maxBytes) throw new Error('A imagem ultrapassou o limite de tamanho configurado.');
-    await sendPhotoBytes(chatId, bytes, '✅ IMAGEM GERADA COM SUCESSO!\n\n👑 Criado com MestreXit.ia.');
-    delivered = true;
-  } catch (error) {
-    const code = String(error.code || '').toLowerCase();
-    console.error('image_provider_error', `HTTP ${error.status || 'sem status'}`, code, String(error.message || '').slice(0, 220));
-    const msg = /insufficient_quota|billing|credit|payment_required/i.test(code + ' ' + error.message)
-      ? '💳 A conta da API de imagens está sem créditos ou com limite de gastos. O administrador deve conferir o faturamento e os limites da API do provedor; o ChatGPT Plus não inclui créditos de API.'
-      : error.status === 429
-      ? '⚠️ O provedor limitou a taxa de geração (HTTP 429). Aguarde e tente novamente. Se persistir, o administrador deve verificar a cota da API.'
-      : error.status === 401 || error.status === 403
-      ? '🔐 A chave da API não foi autorizada a gerar imagens. O administrador deve verificar a chave, modelo e permissões.'
-      : error.status === 400
-      ? '⚙️ O provedor rejeitou os parâmetros de imagem. O administrador deve verificar IMAGE_MODEL, IMAGE_SIZE e IMAGE_QUALITY.'
-      : error.name === 'TimeoutError' || error.name === 'AbortError'
-      ? '⌛ A imagem demorou mais que o limite do servidor. O administrador pode ajustar o tempo de execução ou usar processamento assíncrono.'
-      : '⚠️ Falha na geração da imagem. O administrador pode consultar image_provider_error nos Logs da Vercel.';
-    await sendMessage(chatId, msg);
-  } finally {
-    if (!delivered && quota.usageRef) {
-      // Não consumir a cota do BOT quando o provedor falhar. Transação atômica.
-      await quota.usageRef.transaction(current => current ? { ...current, count: Math.max(0, Number(current.count || 0) - 1) } : undefined)
-        .catch(error => console.error('image_quota_refund_error', error.message));
-    }
-    if (progress?.message_id) await deleteMessage(chatId, progress.message_id).catch(() => {});
   }
 }
 
@@ -650,7 +576,7 @@ async function showAdmin(chatId, user, origin = null) {
 }
 
 async function help(chatId) {
-  return sendMessage(chatId, `👑 MESTREXIT.IA — AJUDA\n\n/key — ativar uma Key\n/id — mostrar e copiar seu ID\n/ia sua pergunta — conversar com a IA\n/imagem descrição — gerar uma imagem\n/status — consultar licença\n/limpar — apagar seu histórico de conversa\n/admin — painel administrativo autorizado\n/start — apresentação e menu\n\nApós ativar uma licença, você também pode enviar mensagens normalmente.`);
+  return sendMessage(chatId, `👑 MESTREXIT.IA — AJUDA\n\n/key — ativar uma Key\n/id — mostrar e copiar seu ID\n/ia sua pergunta — conversar com a IA\n/codigo descrição — criar códigos, sites e projetos\n/status — consultar licença\n/limpar — apagar seu histórico de conversa\n/admin — painel administrativo autorizado\n/start — apresentação e menu\n\nApós ativar uma licença, você também pode enviar mensagens normalmente.`);
 }
 
 async function status(chatId, userId, db) {
@@ -684,10 +610,15 @@ async function handleMessage(db, message) {
     if (!allowed.ok) return denied(chatId, allowed.reason);
     return aiReply(db, chatId, user, arg);
   }
-  if (name === 'imagem') {
+  if (name === 'codigo' || name === 'code') {
     const allowed = await access(db, user.id);
     if (!allowed.ok) return denied(chatId, allowed.reason);
-    return generateImage(db, chatId, user, arg);
+    if (!arg.trim()) return sendMessage(chatId, '💻 Descreva o programa desejado. Exemplo: /codigo crie uma calculadora em JavaScript.');
+    return aiReply(db, chatId, user, `Pedido de programação: ${arg}\nResponda com código funcional, linguagem identificada, instruções claras para executar e explicação objetiva.`);
+  }
+  if (name === 'imagem' || name === 'image') {
+    // Compatibilidade com comandos antigos: a geração de imagens foi removida.
+    return sendMessage(chatId, 'ℹ️ Este bot agora trabalha somente com texto e programação. Use /ia ou /codigo para pedir códigos, sites e explicações.');
   }
   const current = await state(db, user.id);
   if (current.stage === 'await_key') {

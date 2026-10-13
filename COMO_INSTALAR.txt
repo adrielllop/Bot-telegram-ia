@@ -1,0 +1,30 @@
+MESTREXIT.IA — VERSÃO TEXTO + CÓDIGO (GroqCloud)
+================================================
+1. Descompacte o ZIP. Se já tem um GitHub com o bot funcionando, use
+   SOMENTE_ALTERADOS.zip e substitua cada arquivo de mesmo nome na RAIZ.
+2. Abra https://github.com/adrielllop/Bot-telegram-ia e faça Commit changes
+   em main. Não apague as Keys no Firebase.
+3. Na Vercel > Settings > Environment Variables (Production):
+   OPENAI_API_KEY = sua chave GroqCloud que começa com gsk_
+   OPENAI_BASE_URL = https://api.groq.com/openai/v1
+   OPENAI_MODEL = openai/gpt-oss-20b
+   Preservar TELEGRAM_BOT_TOKEN e FIREBASE_* sem mudanças.
+4. Aguarde o novo deploy Ready.
+5. Teste /ia Ola e /codigo crie uma calculadora JavaScript no Telegram.
+6. Para tirar o /imagem do menu do Telegram: abra BotFather > /setcommands,
+   selecione o bot e use o bloco abaixo:
+
+start - Abrir menu
+key - Ativar Key
+id - Mostrar meu ID
+ia - Conversar e perguntar
+codigo - Criar codigos e projetos
+status - Consultar licenca
+ajuda - Ajuda
+limpar - Limpar historico
+admin - Painel administrativo
+
+Não envie tokens, JSON do Firebase ou .env ao GitHub.
+Se o bot não responder, confira Vercel > Logs por ai_provider_error.
+O webhook e o banco de dados continuam os mesmos.
+A logo e o tutorial de ID permanecem; o bot não GERA imagens novas.

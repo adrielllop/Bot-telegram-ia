@@ -5,7 +5,7 @@ const commands = [
   { command: 'key', description: 'Ativar ou inserir uma Key' },
   { command: 'id', description: 'Mostrar e copiar meu ID do Telegram' },
   { command: 'ia', description: 'Conversar com MestreXit.ia' },
-  { command: 'imagem', description: 'Gerar imagem com IA' },
+  { command: 'codigo', description: 'Criar códigos, sites e programas' },
   { command: 'status', description: 'Consultar validade da licença' },
   { command: 'ajuda', description: 'Ver instruções de uso' },
   { command: 'limpar', description: 'Apagar seu histórico de conversa' },

@@ -35,12 +35,3 @@ async function sendAsset(method, chatId, filename, fields, fileField = 'photo') 
 }
 
 export const sendPhotoAsset = (chatId, filename, fields = {}) => sendAsset('sendPhoto', chatId, filename, fields);
-export const sendPhotoBytes = async (chatId, bytes, caption) => {
-  const form = new FormData();
-  form.append('chat_id', String(chatId)); form.append('caption', caption);
-  form.append('photo', new Blob([bytes], { type: 'image/png' }), 'mestrexit.png');
-  const response = await fetch(`${API()}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(25000) });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.ok) throw new Error(`Telegram sendPhoto: ${result.description || response.status}`);
-  return result.result;
-};
