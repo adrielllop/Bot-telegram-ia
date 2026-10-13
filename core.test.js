@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ADMIN_ID, DURATIONS, activateKey, formatRemaining, isAdmin, licenseStatus,
+  ADMIN_ID, DURATIONS, activateKey, activationTransactionValue, durationOfKey, formatRemaining, isAdmin, licenseStatus,
   pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId
 } from './core.js';
 
@@ -79,4 +79,24 @@ test('formatação do tempo restante é legível', () => {
   assert.equal(formatRemaining(0), '0s');
   assert.equal(formatRemaining(90_000), '1min');
   assert.equal(formatRemaining(90_000_000), '1d 1h');
+});
+
+
+test('primeira leitura vazia do Firebase nao aborta a transacao', () => {
+  const user = { id: 9876543210 };
+  const first = activationTransactionValue(null, user, 1000);
+  assert.equal(first, null);
+  const second = activationTransactionValue({ status: 'available', durationId: '1h' }, user, 1000);
+  assert.equal(second.status, 'active');
+  assert.equal(second.expiresAt, 1000 + 60 * 60 * 1000);
+  assert.equal(second.userId, '9876543210');
+  assert.equal(activationTransactionValue({ status: 'active', userId: 'outro' }, user), undefined);
+});
+
+test('licenca antiga que so tem durationId recebe duracao correta', () => {
+  assert.equal(durationOfKey({ durationId: '7d' }), DURATIONS['7d'].ms);
+  assert.equal(durationOfKey({ durationLabel: '1 HORA' }), DURATIONS['1h'].ms);
+  assert.equal(durationOfKey({ durationMs: 2000 }), 2000);
+  assert.equal(durationOfKey({}), 0);
+  assert.equal(activateKey({ status: 'available' }, { id: 1 }), null);
 });

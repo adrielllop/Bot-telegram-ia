@@ -1,0 +1,35 @@
+MESTREXIT.IA — AJUSTE DE ATIVAÇÃO E EXCLUSÃO DE KEY
+
+O QUE FOI CORRIGIDO
+1) Ativação após digitar o próprio ID: evita abortar a transação do Firebase na primeira leitura vazia.
+2) Keys antigas sem durationMs: usa durationId / durationLabel, quando disponíveis.
+3) Mensagem precisa para Key sem duração válida, sem iniciar contagem.
+4) A mensagem de Key gerada passa a mostrar COPIAR KEY e EXCLUIR ESTA KEY.
+5) Administrador confirma exclusão e o mesmo cartão é atualizado com o resultado.
+   EXCLUIR = revogar e bloquear o uso no Firebase; o registro permanece para histórico.
+6) A mensagem de validação permite CANCELAR ATIVAÇÃO sem consumir a Key.
+7) Ao revogar uma Key, não é afetada uma licença mais nova que o usuário possa ter.
+
+ATUALIZAR NO CELULAR
+A) Extraia este ZIP, que contém apenas bot.js, core.js e core.test.js.
+B) Acesse https://github.com/adrielllop/Bot-telegram-ia
+C) Substitua os arquivos bot.js e core.js NA RAIZ do repositório.
+   core.test.js é recomendado para manter o teste atualizado.
+D) Faça o commit na branch main.
+E) Aguarde a Vercel mostrar Production / Ready.
+F) Abra o Telegram, gere UMA NOVA KEY no painel do administrador e teste a ativação.
+G) Para apagar/revogar a Key, toque em EXCLUIR ESTA KEY na mensagem
+   gerada e confirme. A mesma mensagem exibirá o status REVOGADA.
+
+ATENÇÃO
+- Mensagens antigas não ganham botões novos automaticamente.
+  Para remover uma Key antiga: /admin > LISTA DE KEYS > escolha a Key > EXCLUIR KEY.
+- Somente o administrador pode excluir/revogar Keys.
+- No passo em que o usuário informou uma Key válida, ele pode cancelar
+  a ativação, mas não revogar a licença de outras pessoas.
+- Nenhuma edição manual do Firebase nem do webhook é necessária para essas
+  alterações, se seu Firebase atual já estiver funcionando.
+- Não envie token de bot, JSON de conta de serviço nem chaves privadas.
+- Testes: verificações de sintaxe e 12 testes de unidade aprovados; simulação
+  local de ativação, revogação e cancelamento aprovada.
+- Estas verificações não substituem um teste real com Telegram e Firebase em produção.

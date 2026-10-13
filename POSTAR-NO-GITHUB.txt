@@ -1,3 +1,5 @@
+AVISO: Leia COMO_ATUALIZAR_NO_CELULAR.txt PRIMEIRO. A documentação abaixo era para instalação inicial; para uma atualização não recrie o projeto, nem refaça webhook ou as variáveis.
+
 MESTREXIT.IA — COMO ENVIAR PELO GITHUB MOBILE E PUBLICAR NA VERCEL
 
 ANTES DE COMEÇAR

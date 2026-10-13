@@ -1,8 +1,8 @@
 import { randomInt, randomBytes } from 'node:crypto';
 import { database, paths, appendAdminAction } from './firebase.js';
-import { answerCallback, sendChatAction, sendMessage, sendPhotoAsset, sendPhotoBytes } from './telegram-api.js';
+import { answerCallback, editMessage, sendChatAction, sendMessage, sendPhotoAsset, sendPhotoBytes } from './telegram-api.js';
 import {
-  ADMIN_ID, DURATIONS, activateKey, formatDate, formatRemaining, isAdmin, licenseStatus,
+  ADMIN_ID, DURATIONS, activationTransactionValue, durationOfKey, formatDate, formatRemaining, isAdmin, licenseStatus,
   pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId
 } from './core.js';
 
@@ -71,6 +71,7 @@ async function requestId(chatId, user, db, keyValue) {
   return sendPhotoAsset(chatId, 'tutorial-id.png', { caption, reply_markup: keyboard([
     [copyButton('📋 COPIAR MEU ID', user.id)],
     [{ text: '🆔 MOSTRAR MEU ID', callback_data: 'u:showid' }],
+    [{ text: '❌ CANCELAR ATIVAÇÃO', callback_data: 'u:cancel' }],
     [{ text: '🔙 RECOMEÇAR', callback_data: 'u:key' }]
   ]) });
 }
@@ -92,6 +93,9 @@ async function activate(db, chatId, user, keyValue) {
   }
   if (latest.status === 'active' && Number(latest.expiresAt) <= Date.now()) {
     return sendMessage(chatId, '⌛ Esta Key já expirou. Solicite uma nova licença.');
+  }
+  if (latest.status === 'available' && !durationOfKey(latest)) {
+    return sendMessage(chatId, '⚠️ Esta Key existe no Firebase, mas está sem duração válida. Peça ao administrador para verificar o cadastro da licença. Nenhum prazo começou a contar.');
   }
 
   const userRef = db.ref(`${paths.users}/${user.id}`);
@@ -119,8 +123,15 @@ async function activate(db, chatId, user, keyValue) {
 
   let activated = null;
   try {
-    const activationResult = await keyRef.transaction(current => activateKey(current, user, now) || undefined);
-    if (activationResult.committed) activated = activationResult.snapshot.val();
+    const activationResult = await keyRef.transaction(
+      current => activationTransactionValue(current, user, now),
+      undefined,
+      false
+    );
+    if (activationResult.committed && activationResult.snapshot.val()?.status === 'active' &&
+        String(activationResult.snapshot.val()?.userId) === String(user.id)) {
+      activated = activationResult.snapshot.val();
+    }
     latest = (await keyRef.get()).val();
     // Idempotent recovery if the first transaction succeeded but another step failed.
     if (!activated && latest?.status === 'active' && String(latest.userId) === String(user.id)) activated = latest;
@@ -128,7 +139,14 @@ async function activate(db, chatId, user, keyValue) {
       if (latest?.status === 'active' && String(latest.userId) !== String(user.id)) {
         return sendMessage(chatId, '❌ Esta Key foi ativada em outra conta antes da confirmação.');
       }
-      return sendMessage(chatId, '❌ Não foi possível ativar a Key. Verifique o status ou solicite outra Key.');
+      if (latest?.status === 'available' && !durationOfKey(latest)) {
+        return sendMessage(chatId, '⚠️ Esta Key não possui duração válida no Firebase. Peça para o administrador corrigir o cadastro.');
+      }
+      if (latest?.status === 'available') {
+        console.error('activation_transaction_not_committed', 'key_status_available', keyValue);
+        return sendMessage(chatId, '⚠️ A Key continua disponível, mas o Firebase não confirmou a ativação. Tente novamente. Se persistir, envie o erro dos Logs ao administrador.');
+      }
+      return sendMessage(chatId, '❌ A Key mudou de status antes da ativação. Consulte o administrador.');
     }
     const expiresAt = Number(activated.expiresAt);
     if (expiresAt <= Date.now()) return sendMessage(chatId, '⌛ Esta licença já está expirada.');
@@ -356,7 +374,10 @@ async function createKeys(db, chatId, user, durationId, quantity) {
     if (!saved) throw new Error('Não foi possível reservar uma Key única após várias tentativas.');
   }
   await appendAdminAction(db, user.id, 'generate_keys', { durationId, quantity, keys: created.map(item => item.key) });
-  for (const item of created) await sendMessage(chatId, `👑 KEY GERADA!\n\n${SEP}\n\n🔑 KEY: ${item.key}\n⏳ DURAÇÃO: ${item.durationLabel}\n🟢 STATUS: DISPONÍVEL\n📅 CRIAÇÃO: ${formatDate(item.createdAt)}\n\n${SEP}`, { reply_markup: keyboard([[copyButton('📋 COPIAR KEY', item.key)]]) });
+  for (const item of created) await sendMessage(chatId, `👑 KEY GERADA!\n\n${SEP}\n\n🔑 KEY: ${item.key}\n⏳ DURAÇÃO: ${item.durationLabel}\n🟢 STATUS: DISPONÍVEL\n📅 CRIAÇÃO: ${formatDate(item.createdAt)}\n\n${SEP}`, { reply_markup: keyboard([
+    [copyButton('📋 COPIAR KEY', item.key)],
+    [{ text: '🗑 EXCLUIR ESTA KEY', callback_data: `x:delete:${item.key}` }]
+  ]) });
   await setState(db, user.id, { stage: 'admin_home' });
 }
 
@@ -381,7 +402,7 @@ async function listKeys(db, chatId, filter, cursor = '') {
   await sendMessage(chatId, `${title}\n\n${lines.length ? lines.join('\n') : 'Nenhuma Key nesta página.'}\n\nPágina por chave (exibição limitada a 8 itens).`, { reply_markup: keyboard(buttons) });
 }
 
-async function showKey(db, chatId, keyValue) {
+async function showKey(db, chatId, keyValue, messageId = null, notice = '') {
   const key = (await db.ref(`${paths.keys}/${keyValue}`).get()).val();
   if (!key) return sendMessage(chatId, 'Key não encontrada.');
   const status = licenseStatus(key);
@@ -391,15 +412,19 @@ async function showKey(db, chatId, keyValue) {
   if (status === 'paused') rows.push([{ text: '▶️ RETOMAR KEY', callback_data: `o:resume:${keyValue}` }]);
   if (status !== 'revoked') rows.push([{ text: '🔄 RESETAR KEY', callback_data: `x:reset:${keyValue}` }, { text: '🗑 EXCLUIR KEY', callback_data: `x:delete:${keyValue}` }]);
   rows.push([{ text: '🔙 LISTA', callback_data: 'l:all:' }, { text: 'PAINEL ADM', callback_data: 'a:home' }]);
-  await sendMessage(chatId, text, { reply_markup: keyboard(rows) });
+  const body = notice ? `${notice}\n\n${text}` : text;
+  const extra = { reply_markup: keyboard(rows) };
+  return messageId ? editMessage(chatId, messageId, body, extra) : sendMessage(chatId, body, extra);
 }
 
-async function confirmKeyAction(db, chatId, user, action, keyValue) {
-  const verb = action === 'reset' ? 'resetar' : 'excluir';
-  await sendMessage(chatId, `⚠️ Confirma que deseja ${verb} a Key ${keyValue}?`, { reply_markup: keyboard([[{ text: '✅ CONFIRMAR', callback_data: `c:${action}:${keyValue}` }, { text: '❌ CANCELAR', callback_data: `k:${keyValue}` }]]) });
+async function confirmKeyAction(db, chatId, user, action, keyValue, messageId = null) {
+  const verb = action === 'reset' ? 'resetar' : 'revogar';
+  const text = `⚠️ Confirma que deseja ${verb} a Key ${keyValue}?\n\nAo excluir, a Key será revogada no Firebase e deixará de funcionar. O registro será mantido para auditoria.`;
+  const extra = { reply_markup: keyboard([[{ text: '✅ CONFIRMAR', callback_data: `c:${action}:${keyValue}` }, { text: '❌ CANCELAR', callback_data: `k:${keyValue}` }]]) };
+  return messageId ? editMessage(chatId, messageId, text, extra) : sendMessage(chatId, text, extra);
 }
 
-async function mutateKey(db, chatId, user, action, keyValue) {
+async function mutateKey(db, chatId, user, action, keyValue, messageId = null) {
   const ref = db.ref(`${paths.keys}/${keyValue}`);
   const snap = await ref.get();
   const old = snap.val();
@@ -411,7 +436,10 @@ async function mutateKey(db, chatId, user, action, keyValue) {
       if (action === 'pause') return pauseKey(current, now) || undefined;
       if (action === 'resume') return resumeKey(current, now) || undefined;
       if (action === 'reset') return resetKey(current, now) || undefined;
-      if (action === 'delete') return { ...current, status: 'revoked', deletedAt: now, revokedAt: now, userId: null, username: null, remainingMs: 0, expiresAt: null, updatedAt: now };
+      if (action === 'delete') {
+        if (current.deletedAt || current.status === 'revoked') return;
+        return { ...current, status: 'revoked', deletedAt: now, revokedAt: now, userId: null, username: null, remainingMs: 0, expiresAt: null, updatedAt: now };
+      }
     });
     const fresh = (await ref.get()).val();
     if (!result.committed) return sendMessage(chatId, 'A ação não pôde ser aplicada ao status atual da Key.');
@@ -421,11 +449,18 @@ async function mutateKey(db, chatId, user, action, keyValue) {
         : action === 'resume'
           ? { accessActive: true, expiresAt: fresh.expiresAt }
           : { licenseKey: null, accessActive: false, expiresAt: null };
-      await db.ref(`${paths.users}/${old.userId}`).update({ ...profilePatch, updatedAt: now });
+      const ownerRef = db.ref(`${paths.users}/${old.userId}`);
+      const owner = (await ownerRef.get()).val();
+      // Do not remove an unrelated newer licence from the same account.
+      if (owner?.licenseKey === keyValue) {
+        await ownerRef.update({ ...profilePatch, updatedAt: now });
+      }
     }
     await appendAdminAction(db, user.id, action, { key: keyValue, previousStatus: old.status });
     const label = { pause: 'pausada', resume: 'retomada', reset: 'resetada e liberada para nova ativação', delete: 'revogada e excluída do uso' }[action];
-    await sendMessage(chatId, `✅ Key ${label}.\nStatus: ${statusLabel(licenseStatus(fresh))}${fresh.status === 'paused' ? `\nTempo congelado: ${formatRemaining(fresh.remainingMs)}` : ''}`);
+    const notice = `✅ Key ${label}.`;
+    if (messageId) return showKey(db, chatId, keyValue, messageId, notice);
+    await sendMessage(chatId, notice);
     return showKey(db, chatId, keyValue);
   }
 }
@@ -541,6 +576,10 @@ async function handleCallback(db, callback) {
   }
   await answerCallback(callback.id);
   if (data === 'u:key') return beginKey(chatId, user.id, db);
+  if (data === 'u:cancel') {
+    await clearState(db, user.id);
+    return sendMessage(chatId, '✅ Ativação cancelada. Nenhuma Key foi ativada e nenhum prazo começou a contar.');
+  }
   if (data === 'u:showid') return showMyId(chatId, user);
   if (data.startsWith('u:approve:')) return decideApproval(db, chatId, user, data.slice('u:approve:'.length), true);
   if (data.startsWith('u:deny:')) return decideApproval(db, chatId, user, data.slice('u:deny:'.length), false);
@@ -560,21 +599,21 @@ async function handleCallback(db, callback) {
     if (!['all', 'active', 'available', 'paused', 'expired', 'revoked'].includes(filter)) return sendMessage(chatId, 'Filtro inválido.');
     return listKeys(db, chatId, filter, cursor);
   }
-  if (data.startsWith('k:')) return showKey(db, chatId, data.slice(2));
+  if (data.startsWith('k:')) return showKey(db, chatId, data.slice(2), callback.message?.message_id);
   if (data.startsWith('o:')) {
     const [, action, keyValue] = data.split(':');
     if (!validKeyFormat(keyValue)) return sendMessage(chatId, 'Key inválida.');
-    return mutateKey(db, chatId, user, action, keyValue);
+    return mutateKey(db, chatId, user, action, keyValue, callback.message?.message_id);
   }
   if (data.startsWith('x:')) {
     const [, action, keyValue] = data.split(':');
     if (!['reset', 'delete'].includes(action) || !validKeyFormat(keyValue)) return sendMessage(chatId, 'Ação inválida.');
-    return confirmKeyAction(db, chatId, user, action, keyValue);
+    return confirmKeyAction(db, chatId, user, action, keyValue, callback.message?.message_id);
   }
   if (data.startsWith('c:')) {
     const [, action, keyValue] = data.split(':');
     if (!['reset', 'delete'].includes(action) || !validKeyFormat(keyValue)) return sendMessage(chatId, 'Ação inválida.');
-    return mutateKey(db, chatId, user, action, keyValue);
+    return mutateKey(db, chatId, user, action, keyValue, callback.message?.message_id);
   }
   return sendMessage(chatId, 'Opção não reconhecida. Use /start.');
 }

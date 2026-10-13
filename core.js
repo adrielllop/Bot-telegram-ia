@@ -45,15 +45,34 @@ export function remainingMs(key, now = Date.now()) {
   return 0;
 }
 
+export function durationOfKey(key) {
+  if (!key) return 0;
+  const explicit = Number(key.durationMs);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  // Some legacy records saved only the duration identifier, not durationMs.
+  const id = key.durationId || key.duration;
+  if (id && DURATIONS[id]) return DURATIONS[id].ms;
+  const label = String(key.durationLabel || '').trim();
+  return Object.values(DURATIONS).find(item => item.label === label)?.ms || 0;
+}
+
 export function activateKey(key, user, now = Date.now()) {
   if (!key || key.status !== 'available' || key.deletedAt) return null;
-  const durationMs = Number(key.durationMs);
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+  const durationMs = durationOfKey(key);
+  if (!durationMs) return null;
   return {
-    ...key, status: 'active', userId: String(user.id), username: user.username || null,
+    ...key, durationMs, status: 'active', userId: String(user.id), username: user.username || null,
     firstName: user.first_name || null, activatedAt: now, expiresAt: now + durationMs,
     remainingMs: null, pausedAt: null, updatedAt: now
   };
+}
+
+// Realtime Database transactions can initially receive null before their
+// server value is loaded. Returning undefined in that first invocation
+// aborts the transaction even if the Key exists on the server.
+export function activationTransactionValue(current, user, now = Date.now()) {
+  if (current == null) return null;
+  return activateKey(current, user, now) || undefined;
 }
 
 export function pauseKey(key, now = Date.now()) {

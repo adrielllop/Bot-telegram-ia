@@ -1,0 +1,35 @@
+MESTREXIT.IA — ATUALIZAÇÃO SEGURA NO GITHUB PELO CELULAR
+13/10/2026
+
+ARQUIVOS ATUALIZADOS:
+- bot.js: Keys novas de 6 dígitos, COPIAR KEY, COPIAR MEU ID, fluxo de ativação e confirmação por outro ID.
+- core.js: aceita Keys novas de 6 e antigas de 16 dígitos.
+- core.test.js: valida formatos e lógica.
+- firebase.js: corrigido para Firebase Admin SDK modular; mantém o mesmo banco.
+- vercel.json: resolve incompatibilidade builds/functions, inclui as imagens.
+- register-commands.js: adiciona o comando /id ao cadastro opcional.
+- README.md: instruções revisadas.
+- database.rules.json: SEM ALTERAÇÃO obrigatória, use as regras que já funcionam no seu Firebase.
+
+PASSO A PASSO
+1) Mantenha seu repositório GitHub conectado à Vercel.
+2) Faça backup dos arquivos atuais do GitHub ANTES de substituir, pois seu ZIP pode estar defasado em relação às edições feitas diretamente no GitHub.
+3) Extraia este ZIP; NÃO envie o ZIP como se fosse código fonte e não altere a pasta raiz configurada na Vercel.
+4) No GitHub, abra adrielllop/Bot-telegram-ia e substitua na branch main SOMENTE os arquivos indicados acima. Se o GitHub estiver mais novo, compare as diferenças primeiro.
+5) Na Vercel > Deployments aguarde o novo commit aparecer como Ready em Production. Não precisa cadastrar as variáveis novamente se estão corretas.
+6) Abra Telegram: /start > admin > gerar keys > escolha duração > digite 1. A Key nova deve ter 6 dígitos com botão COPIAR KEY.
+7) Em outra conta Telegram: /key > envie essa Key > receba a mensagem KEY VALIDADA > COPIAR MEU ID > cole/mande o ID > confira /status.
+8) Para ativar em um ID diferente: o destinatário deve iniciar conversa privada com o bot, o emissor informa o ID e o destinatário confirma o pedido recebido (até 15 min).
+9) Se algo falhar, veja Vercel > Logs. Não envie tokens, JSON de conta de serviço ou chaves privadas em imagens.
+
+FIREBASE
+- O Firebase REALTIME DATABASE atual permanece o mesmo. Não apague as chaves antigas.
+- O código cria automaticamente /activationRequests para confirmações e utiliza /keys, /users, /activation existentes.
+- Não basta modificar database.rules.json no GitHub para modificar as regras na console Firebase, mas neste ajuste não precisa mudá-las.
+- O serviço usa FIREBASE_SERVICE_ACCOUNT_JSON e FIREBASE_DATABASE_URL já cadastrados na Vercel. Se uma chave privada antiga foi mostrada em conversa/imagem, gere chave nova, revogue a antiga e atualize a variável.
+- NÃO registre novamente o webhook se o domínio público e token do bot não mudaram.
+
+OBSERVAÇÕES
+- Copiar pelo botão usa o recurso copy_text da API do Telegram, disponível em clientes recentes. Em versões antigas, pode ser necessário selecionar e copiar o número exibido na mensagem.
+- Com 6 dígitos há só um milhão de combinações. O bot limita tentativas por conta; para vender Keys em escala, considere aumentar o comprimento ou implementar proteção global contra ataques distribuídos.
+- Sem acesso ao Firebase/Telegram da conta não há teste ao vivo: valide uma Key de teste antes de distribuir as demais.
