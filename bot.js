@@ -454,6 +454,43 @@ async function createKeys(db, chatId, user, durationId, quantity, opts = {}) {
   ], origin);
 }
 
+// Firebase DataSnapshot.forEach expects `false`/`undefined` to keep iterating.
+// Never return Array.push() from its callback: that method returns a number.
+// A secondary completeness check safeguards against truncated key lists.
+function compareFirebaseKey(a, b) {
+  const intKey = value => {
+    if (!/^(0|[1-9]\d*)$/.test(value)) return null;
+    const numeric = Number(value);
+    return Number.isInteger(numeric) && numeric >= 0 && numeric <= 2147483647 ? numeric : null;
+  };
+  const aInt = intKey(a);
+  const bInt = intKey(b);
+  if (aInt !== null && bInt !== null) return aInt - bInt;
+  if (aInt !== null) return -1;
+  if (bInt !== null) return 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function keyEntriesFromSnapshot(snapshot) {
+  const entries = [];
+  snapshot.forEach(child => {
+    entries.push({ key: String(child.key), value: child.val() });
+    return false;
+  });
+  // Some SDK adapters can prematurely stop iteration; never hide records.
+  const count = snapshot.numChildren?.();
+  if (Number.isInteger(count) && entries.length < count) {
+    const raw = snapshot.val();
+    if (raw && typeof raw === 'object') {
+      console.warn('admin_key_list_incomplete_iteration', entries.length, count);
+      return Object.entries(raw)
+        .map(([key, value]) => ({ key, value }))
+        .sort((a, b) => compareFirebaseKey(a.key, b.key));
+    }
+  }
+  return entries;
+}
+
 async function listKeys(db, chatId, filter, cursor = '', origin = null) {
   // Avança sobre chaves que não correspondem ao filtro e coleta até 9,
   // para identificar se existe próxima página sem esconder registros futuros.
@@ -464,8 +501,7 @@ async function listKeys(db, chatId, filter, cursor = '', origin = null) {
     const snap = await (scanCursor
       ? db.ref(paths.keys).orderByKey().startAt(scanCursor).limitToFirst(101).get()
       : db.ref(paths.keys).orderByKey().limitToFirst(100).get());
-    const entries = [];
-    snap.forEach(child => entries.push({ key: child.key, value: child.val() }));
+    const entries = keyEntriesFromSnapshot(snap);
     if (scanCursor && entries[0]?.key === scanCursor) entries.shift();
     if (!entries.length) break;
     for (const entry of entries) {
