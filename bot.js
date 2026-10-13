@@ -1,27 +1,54 @@
 import { randomInt, randomBytes } from 'node:crypto';
 import { database, paths, appendAdminAction } from './firebase.js';
-import { answerCallback, editMessage, sendChatAction, sendMessage, sendPhotoAsset, sendPhotoBytes } from './telegram-api.js';
+import { answerCallback, deleteMessage, editMessage, sendChatAction, sendMessage, sendPhotoAsset, sendPhotoBytes } from './telegram-api.js';
 import {
   ADMIN_ID, DURATIONS, activationTransactionValue, durationOfKey, formatDate, formatRemaining, isAdmin, licenseStatus,
-  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId
+  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId, parseCustomDuration
 } from './core.js';
 
 const SEP = '━━━━━━━━━━━━━━━━━━';
 const keyboard = rows => ({ inline_keyboard: rows });
 const copyButton = (label, value) => ({ text: label, copy_text: { text: String(value) } });
 const ACTIVATION_REQUEST_TTL_MS = 15 * 60 * 1000;
-const mainKeyboard = () => keyboard([
+const mainKeyboard = (userId) => keyboard([
   [{ text: '🔑 INSERIR KEY', callback_data: 'u:key' }],
   [{ text: '🆔 MOSTRAR MEU ID', callback_data: 'u:showid' }],
-  [{ text: '👑 PAINEL ADM', callback_data: 'a:home' }]
+  ...(isAdmin(userId) ? [[{ text: '👑 PAINEL ADM', callback_data: 'a:home' }]] : [])
 ]);
 const adminKeyboard = () => keyboard([
   [{ text: '🔑 GERAR KEYS', callback_data: 'a:gen' }, { text: '📋 LISTA DE KEYS', callback_data: 'l:all:' }],
   [{ text: '✅ KEYS ATIVAS', callback_data: 'l:active:' }, { text: '⏳ KEYS DISPONÍVEIS', callback_data: 'l:available:' }],
   [{ text: '⏸ KEYS PAUSADAS', callback_data: 'l:paused:' }, { text: '❌ KEYS EXPIRADAS', callback_data: 'l:expired:' }],
   [{ text: '👥 USUÁRIOS ATIVOS', callback_data: 'a:users' }, { text: '📊 ESTATÍSTICAS', callback_data: 'a:stats' }],
-  [{ text: '🔙 VOLTAR', callback_data: 'u:home' }]
+  [{ text: '🏠 VOLTAR AO MENU NORMAL', callback_data: 'u:home' }]
 ]);
+// Painel administrativo: botões editam a própria mensagem anterior.
+// Se ela for uma foto (por exemplo, o /start), excluímos a foto e enviamos
+// uma mensagem de texto, porque editMessageText não funciona em fotos.
+async function showPanel(chatId, text, rows, origin = null) {
+  const extra = { reply_markup: keyboard(rows) };
+  if (!origin?.message_id) return sendMessage(chatId, text, extra);
+  if (origin.text) {
+    try { return await editMessage(chatId, origin.message_id, text, extra); }
+    catch (error) {
+      if (/message is not modified/i.test(String(error.message))) return;
+      console.warn('admin_panel_edit_fallback', String(error.message).slice(0, 140));
+    }
+  }
+  await deleteMessage(chatId, origin.message_id).catch(error => {
+    console.warn('admin_panel_delete_fallback', String(error.message).slice(0, 140));
+  });
+  return sendMessage(chatId, text, extra);
+}
+
+async function showNormalMenu(chatId, user, origin = null) {
+  return showPanel(chatId,
+    '🏠 MENU PRINCIPAL — MESTREXIT.IA\n\nEscolha uma opção abaixo. Use /start para ver a apresentação completa.',
+    mainKeyboard(user.id).inline_keyboard, origin);
+}
+
+const backAdmin = [{ text: '🔙 PAINEL ADM', callback_data: 'a:home' }];
+
 const statusLabel = status => ({ available: 'DISPONÍVEL', active: 'ATIVA', paused: 'PAUSADA', expired: 'EXPIRADA', revoked: 'REVOGADA' })[status] || String(status || 'DESCONHECIDO').toUpperCase();
 const userName = user => [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username || 'Usuário';
 
@@ -33,9 +60,9 @@ async function state(db, id) { return (await db.ref(`${paths.activation}/${id}`)
 async function setState(db, id, value) { await db.ref(`${paths.activation}/${id}`).set({ ...value, updatedAt: Date.now() }); }
 async function clearState(db, id) { await db.ref(`${paths.activation}/${id}`).remove(); }
 
-async function home(chatId) {
+async function home(chatId, user) {
   const text = `👑 𝗠𝗘𝗦𝗧𝗥𝗘𝗫𝗜𝗧.𝗜𝗔 👑\n\n${SEP}\n\n🤖 𝗢𝗟Á, 𝗛𝗨𝗠𝗔𝗡𝗢!\n\n🔥 Seja muito bem-vindo ao meu universo!\n\n👑 Eu me chamo MestreXit.ia, sua inteligência artificial sem limites para a criatividade!\n\n🧠 Fui criado para transformar suas ideias em realidade e levar sua experiência com inteligência artificial a outro nível.\n\n⚡ 𝗢 𝗤𝗨𝗘 𝗘𝗨 𝗣𝗢𝗦𝗦𝗢 𝗙𝗔𝗭𝗘𝗥?\n\n💬 Conversar e responder suas perguntas.\n💻 Criar códigos, sites e projetos.\n🎨 Gerar imagens com inteligência artificial.\n✍️ Criar textos e conteúdos incríveis.\n🚀 Ajudar a desenvolver suas ideias.\n🧠 Explicar assuntos e resolver problemas.\n\n${SEP}\n\n🔐 𝗔𝗧𝗜𝗩𝗘 𝗦𝗘𝗨 𝗔𝗖𝗘𝗦𝗦𝗢\n\n⚡ Para despertar todo o meu poder, você precisa de uma Key válida.\n\n👑 Escolha uma opção abaixo:`;
-  return sendPhotoAsset(chatId, 'logo.png', { caption: text, reply_markup: mainKeyboard() });
+  return sendPhotoAsset(chatId, 'logo.png', { caption: text, reply_markup: mainKeyboard(user.id) });
 }
 
 async function beginKey(chatId, userId, db) {
@@ -313,96 +340,156 @@ async function reserveImage(db, userId) {
     if (count >= limit) return;
     return { count: count + 1, updatedAt: Date.now() };
   });
-  return { allowed: result.committed, limit };
+  return { allowed: result.committed, limit, usageRef: ref };
 }
 
 async function generateImage(db, chatId, user, prompt) {
   if (!prompt.trim()) return sendMessage(chatId, '🎨 Envie uma descrição após /imagem. Exemplo: /imagem um robô dourado com coroa em estilo 3D');
   const imageApiKey = process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY;
-  if (!imageApiKey) return sendMessage(chatId, '⚙️ A chave do provedor de IA ainda não foi configurada pelo administrador.');
+  if (!imageApiKey) return sendMessage(chatId, '⚙️ Falta configurar IMAGE_API_KEY ou OPENAI_API_KEY na Vercel.');
   const quota = await reserveImage(db, user.id);
-  if (!quota.allowed) return sendMessage(chatId, `⏳ Você atingiu o limite configurado de ${quota.limit} imagens por dia. Tente novamente amanhã.`);
-  await sendMessage(chatId, '🎨 𝗖𝗥𝗜𝗔𝗡𝗗𝗢 𝗦𝗨𝗔 𝗜𝗠𝗔𝗚𝗘𝗠...\n\n⚡ Aguarde enquanto o MestreXit.ia transforma sua ideia em realidade!');
-  await sendChatAction(chatId, 'upload_photo').catch(() => {});
+  if (!quota.allowed) return sendMessage(chatId, `⏳ Você atingiu o limite do BOT de ${quota.limit} imagens por dia. Tente novamente amanhã.`);
+  let progress = null;
+  let delivered = false;
   try {
+    progress = await sendMessage(chatId, '🎨 Criando sua imagem… Aguarde.');
+    await sendChatAction(chatId, 'upload_photo').catch(() => {});
+    const timeout = Math.max(20000, Math.min(90000, Number(process.env.IMAGE_TIMEOUT_MS || 55000)));
     const response = await fetch(process.env.IMAGE_API_URL || 'https://api.openai.com/v1/images/generations', {
       method: 'POST', headers: { authorization: `Bearer ${imageApiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ model: process.env.IMAGE_MODEL || 'gpt-image-1', prompt: prompt.slice(0, 4000), n: 1, size: process.env.IMAGE_SIZE || '1024x1024', quality: process.env.IMAGE_QUALITY || 'medium' }),
-      signal: AbortSignal.timeout(Math.min(18000, Number(process.env.IMAGE_TIMEOUT_MS || 15000)))
+      signal: AbortSignal.timeout(timeout)
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(result.error?.message || `HTTP ${response.status}`); error.status = response.status; throw error;
+      const error = new Error(String(result.error?.message || `HTTP ${response.status}`).slice(0, 400));
+      error.status = response.status;
+      error.code = result.error?.code || result.error?.type || '';
+      throw error;
     }
     const item = result.data?.[0];
     let bytes;
     if (item?.b64_json) bytes = Buffer.from(item.b64_json, 'base64');
     else if (item?.url) {
-      const imageResponse = await fetch(item.url, { signal: AbortSignal.timeout(8000) });
-      if (!imageResponse.ok) throw new Error('Não foi possível baixar o resultado de imagem.');
+      const imageResponse = await fetch(item.url, { signal: AbortSignal.timeout(15000) });
+      if (!imageResponse.ok) throw new Error('Não foi possível baixar a imagem retornada.');
       bytes = Buffer.from(await imageResponse.arrayBuffer());
-    } else throw new Error('O provedor não retornou a imagem.');
+    } else throw new Error('O provedor não retornou dados de imagem.');
     const maxBytes = Number(process.env.MAX_IMAGE_BYTES || 9500000);
     if (!bytes.length || bytes.length > maxBytes) throw new Error('A imagem ultrapassou o limite de tamanho configurado.');
     await sendPhotoBytes(chatId, bytes, '✅ IMAGEM GERADA COM SUCESSO!\n\n👑 Criado com MestreXit.ia.');
+    delivered = true;
   } catch (error) {
-    console.error('image_provider_error', error.message);
-    await sendMessage(chatId, error.status === 429 ? '⚠️ O provedor de imagens atingiu seu limite. Tente mais tarde.' : error.name === 'TimeoutError' || error.name === 'AbortError' ? '⌛ A geração ultrapassou o tempo desta função. Consulte a documentação para configurar um worker assíncrono.' : '⚠️ Não foi possível gerar a imagem agora. Verifique o provedor e tente novamente.');
+    const code = String(error.code || '').toLowerCase();
+    console.error('image_provider_error', `HTTP ${error.status || 'sem status'}`, code, String(error.message || '').slice(0, 220));
+    const msg = /insufficient_quota|billing|credit|payment_required/i.test(code + ' ' + error.message)
+      ? '💳 A conta da API de imagens está sem créditos ou com limite de gastos. O administrador deve conferir o faturamento e os limites da API do provedor; o ChatGPT Plus não inclui créditos de API.'
+      : error.status === 429
+      ? '⚠️ O provedor limitou a taxa de geração (HTTP 429). Aguarde e tente novamente. Se persistir, o administrador deve verificar a cota da API.'
+      : error.status === 401 || error.status === 403
+      ? '🔐 A chave da API não foi autorizada a gerar imagens. O administrador deve verificar a chave, modelo e permissões.'
+      : error.status === 400
+      ? '⚙️ O provedor rejeitou os parâmetros de imagem. O administrador deve verificar IMAGE_MODEL, IMAGE_SIZE e IMAGE_QUALITY.'
+      : error.name === 'TimeoutError' || error.name === 'AbortError'
+      ? '⌛ A imagem demorou mais que o limite do servidor. O administrador pode ajustar o tempo de execução ou usar processamento assíncrono.'
+      : '⚠️ Falha na geração da imagem. O administrador pode consultar image_provider_error nos Logs da Vercel.';
+    await sendMessage(chatId, msg);
+  } finally {
+    if (!delivered && quota.usageRef) {
+      // Não consumir a cota do BOT quando o provedor falhar. Transação atômica.
+      await quota.usageRef.transaction(current => current ? { ...current, count: Math.max(0, Number(current.count || 0) - 1) } : undefined)
+        .catch(error => console.error('image_quota_refund_error', error.message));
+    }
+    if (progress?.message_id) await deleteMessage(chatId, progress.message_id).catch(() => {});
   }
 }
 
-async function startGeneration(db, chatId, user) {
-  const durations = Object.entries(DURATIONS).map(([id, item]) => [{ text: `⏱ ${item.label}`, callback_data: `g:d:${id}` }]);
+async function startGeneration(db, chatId, user, origin = null) {
+  const items = Object.entries(DURATIONS);
+  const rows = [];
+  for (let i = 0; i < items.length; i += 2) {
+    rows.push(items.slice(i, i + 2).map(([id, item]) => ({ text: `⏱ ${item.label}`, callback_data: `g:d:${id}` })));
+  }
+  rows.push([{ text: '✏️ DURAÇÃO PERSONALIZADA', callback_data: 'a:custom' }]);
+  rows.push(backAdmin);
   await setState(db, user.id, { stage: 'choose_duration' });
-  return sendMessage(chatId, '🔑 𝗚𝗘𝗥𝗔𝗥 𝗞𝗘𝗬𝗦\n\nEscolha a duração da licença:', { reply_markup: keyboard(durations.concat([[{ text: '🔙 PAINEL ADM', callback_data: 'a:home' }]])) });
+  return showPanel(chatId, `🔑 GERAR KEYS\n\nEscolha uma das ${items.length} durações ou informe uma personalizada.\nÉ possível gerar quantos lotes desejar.`, rows, origin);
 }
 
-async function createKeys(db, chatId, user, durationId, quantity) {
-  const duration = DURATIONS[durationId];
-  const max = Math.min(20, Math.max(1, Number(process.env.MAX_KEYS_PER_GENERATION || 6)));
-  if (!duration || !Number.isInteger(quantity) || quantity < 1 || quantity > max) return sendMessage(chatId, `❌ Quantidade inválida. Informe um número de 1 a ${max}.`);
+function generationMax() {
+  return Math.max(1, Math.min(50, Math.trunc(Number(process.env.MAX_KEYS_PER_GENERATION || 30) || 30)));
+}
+
+async function createKeys(db, chatId, user, durationId, quantity, opts = {}) {
+  const duration = durationId === 'custom' ? opts.customDuration : DURATIONS[durationId];
+  const max = generationMax();
+  const origin = opts.origin || null;
+  if (!duration || !Number.isSafeInteger(Number(duration.ms)) || Number(duration.ms) < 15 * 60000 ||
+      !Number.isInteger(quantity) || quantity < 1 || quantity > max) {
+    return showPanel(chatId, `❌ Quantidade inválida. Informe um número de 1 a ${max}.`, [backAdmin], origin);
+  }
   const created = [];
   for (let i = 0; i < quantity; i++) {
     let saved = false;
-    for (let attempt = 0; attempt < 8 && !saved; attempt++) {
+    for (let attempt = 0; attempt < 16 && !saved; attempt++) {
       const keyValue = String(randomInt(0, 1_000_000)).padStart(6, '0');
       const ref = db.ref(`${paths.keys}/${keyValue}`);
       const record = { key: keyValue, status: 'available', durationId, durationLabel: duration.label, durationMs: duration.ms, createdAt: Date.now(), createdBy: String(user.id) };
       const result = await ref.transaction(current => current ? undefined : record);
       if (result.committed) { saved = true; created.push(result.snapshot.val()); }
     }
-    if (!saved) throw new Error('Não foi possível reservar uma Key única após várias tentativas.');
+    if (!saved) {
+      console.error('generation_partial_success', created.length, quantity);
+      break; // Não perder as Keys já geradas. Continuam acessíveis pela lista.
+    }
   }
-  await appendAdminAction(db, user.id, 'generate_keys', { durationId, quantity, keys: created.map(item => item.key) });
-  for (const item of created) await sendMessage(chatId, `👑 KEY GERADA!\n\n${SEP}\n\n🔑 KEY: ${item.key}\n⏳ DURAÇÃO: ${item.durationLabel}\n🟢 STATUS: DISPONÍVEL\n📅 CRIAÇÃO: ${formatDate(item.createdAt)}\n\n${SEP}`, { reply_markup: keyboard([
-    [copyButton('📋 COPIAR KEY', item.key)],
-    [{ text: '🗑 EXCLUIR ESTA KEY', callback_data: `x:delete:${item.key}` }]
-  ]) });
+  await appendAdminAction(db, user.id, 'generate_keys', { durationId, durationMs: duration.ms, quantity: created.length, keys: created.map(item => item.key) });
   await setState(db, user.id, { stage: 'admin_home' });
+  const lines = created.map(item => `🔑 ${item.key}`).join('\n');
+  const text = `✅ ${created.length} DE ${quantity} KEYS GERADAS\n\n⏱ Duração: ${duration.label}\n🟢 Status: DISPONÍVEIS\n\n${lines}\n\nToque em LISTA DE KEYS para abrir qualquer uma, copiá-la ou revogá-la pela própria mensagem. É possível gerar novos lotes, sem limite de 8 Keys no total.`;
+  return showPanel(chatId, text, [
+    [{ text: '📋 LISTA DE KEYS', callback_data: 'l:all:' }, { text: '🔑 GERAR MAIS', callback_data: 'a:gen' }],
+    backAdmin,
+    [{ text: '🏠 MENU NORMAL', callback_data: 'u:home' }]
+  ], origin);
 }
 
-async function listKeys(db, chatId, filter, cursor = '') {
-  const ref = db.ref(paths.keys).orderByKey();
-  const query = cursor ? ref.startAt(cursor) : ref;
-  const snap = await query.limitToFirst(9).get();
-  const entries = [];
-  snap.forEach(child => entries.push({ key: child.key, value: child.val() }));
-  const page = cursor && entries[0]?.key === cursor ? entries.slice(1) : entries;
-  const current = page.slice(0, 8);
-  const hasMore = page.length > 8;
-  const lines = current.filter(({ value }) => filter === 'all' || licenseStatus(value) === filter).map(({ key, value }) => {
-    const status = licenseStatus(value);
-    const remaining = status === 'active' || status === 'paused' ? formatRemaining(remainingMs(value)) : '—';
-    return `🔑 ${key}\n📅 Criada: ${formatDate(value.createdAt)} | ⏳ ${value.durationLabel || formatRemaining(value.durationMs)} | 📊 ${statusLabel(status)}\n🆔 ID: ${value.userId || '—'} | 👤 ${value.username ? '@' + value.username : '—'}\n✅ Ativada: ${formatDate(value.activatedAt)} | ⌛ ${remaining} | 📅 vence: ${formatDate(value.expiresAt)}`;
-  });
+async function listKeys(db, chatId, filter, cursor = '', origin = null) {
+  // Avança sobre chaves que não correspondem ao filtro e coleta até 9,
+  // para identificar se existe próxima página sem esconder registros futuros.
+  const found = [];
+  let scanCursor = cursor;
+  let done = false;
+  while (!done && found.length < 9) {
+    const snap = await (scanCursor
+      ? db.ref(paths.keys).orderByKey().startAt(scanCursor).limitToFirst(101).get()
+      : db.ref(paths.keys).orderByKey().limitToFirst(100).get());
+    const entries = [];
+    snap.forEach(child => entries.push({ key: child.key, value: child.val() }));
+    if (scanCursor && entries[0]?.key === scanCursor) entries.shift();
+    if (!entries.length) break;
+    for (const entry of entries) {
+      if (filter === 'all' || licenseStatus(entry.value) === filter) found.push(entry);
+      if (found.length >= 9) break;
+    }
+    const lastScanned = entries.at(-1)?.key;
+    done = entries.length < 100 || !lastScanned || lastScanned === scanCursor;
+    scanCursor = lastScanned;
+  }
+  const page = found.slice(0, 8);
+  const hasMore = found.length > 8;
   const title = filter === 'all' ? '📋 LISTA DE KEYS' : `📋 KEYS ${statusLabel(filter)}`;
-  const buttons = current.filter(({ value }) => filter === 'all' || licenseStatus(value) === filter).map(({ key }) => [{ text: `🔑 ${key}`, callback_data: `k:${key}` }]);
-  if (hasMore && current.length) buttons.push([{ text: '➡️ Próxima página', callback_data: `l:${filter}:${current.at(-1).key}` }]);
-  buttons.push([{ text: '🔙 PAINEL ADM', callback_data: 'a:home' }]);
-  await sendMessage(chatId, `${title}\n\n${lines.length ? lines.join('\n') : 'Nenhuma Key nesta página.'}\n\nPágina por chave (exibição limitada a 8 itens).`, { reply_markup: keyboard(buttons) });
+  const lines = page.map(({ key, value }) => `🔑 ${key} | ${statusLabel(licenseStatus(value))} | ${value.durationLabel || formatRemaining(durationOfKey(value))} | ID ${value.userId || '—'}`);
+  const buttons = page.map(({ key }) => [{ text: `🔎 ${key}`, callback_data: `k:${key}` }]);
+  const nav = [];
+  if (cursor) nav.push({ text: '⏮ PRIMEIRA PÁGINA', callback_data: `l:${filter}:` });
+  if (hasMore && page.length) nav.push({ text: '➡️ PRÓXIMA', callback_data: `l:${filter}:${page.at(-1).key}` });
+  if (nav.length) buttons.push(nav);
+  buttons.push([{ text: '🔑 GERAR MAIS', callback_data: 'a:gen' }, { text: '🔙 PAINEL ADM', callback_data: 'a:home' }]);
+  return showPanel(chatId, `${title}\n\n${lines.length ? lines.join('\n') : 'Nenhuma Key encontrada.'}\n\n8 exibidas por página; as demais ficam acessíveis em PRÓXIMA. Não existe limite total de 8 Keys.`, buttons, origin);
 }
 
-async function showKey(db, chatId, keyValue, messageId = null, notice = '') {
+async function showKey(db, chatId, keyValue, origin = null, notice = '') {
   const key = (await db.ref(`${paths.keys}/${keyValue}`).get()).val();
   if (!key) return sendMessage(chatId, 'Key não encontrada.');
   const status = licenseStatus(key);
@@ -413,22 +500,21 @@ async function showKey(db, chatId, keyValue, messageId = null, notice = '') {
   if (status !== 'revoked') rows.push([{ text: '🔄 RESETAR KEY', callback_data: `x:reset:${keyValue}` }, { text: '🗑 EXCLUIR KEY', callback_data: `x:delete:${keyValue}` }]);
   rows.push([{ text: '🔙 LISTA', callback_data: 'l:all:' }, { text: 'PAINEL ADM', callback_data: 'a:home' }]);
   const body = notice ? `${notice}\n\n${text}` : text;
-  const extra = { reply_markup: keyboard(rows) };
-  return messageId ? editMessage(chatId, messageId, body, extra) : sendMessage(chatId, body, extra);
+  return showPanel(chatId, body, rows, origin);
 }
 
-async function confirmKeyAction(db, chatId, user, action, keyValue, messageId = null) {
+async function confirmKeyAction(db, chatId, user, action, keyValue, origin = null) {
   const verb = action === 'reset' ? 'resetar' : 'revogar';
   const text = `⚠️ Confirma que deseja ${verb} a Key ${keyValue}?\n\nAo excluir, a Key será revogada no Firebase e deixará de funcionar. O registro será mantido para auditoria.`;
   const extra = { reply_markup: keyboard([[{ text: '✅ CONFIRMAR', callback_data: `c:${action}:${keyValue}` }, { text: '❌ CANCELAR', callback_data: `k:${keyValue}` }]]) };
-  return messageId ? editMessage(chatId, messageId, text, extra) : sendMessage(chatId, text, extra);
+  return showPanel(chatId, text, extra.reply_markup.inline_keyboard, origin);
 }
 
-async function mutateKey(db, chatId, user, action, keyValue, messageId = null) {
+async function mutateKey(db, chatId, user, action, keyValue, origin = null) {
   const ref = db.ref(`${paths.keys}/${keyValue}`);
   const snap = await ref.get();
   const old = snap.val();
-  if (!old) return sendMessage(chatId, 'Key não encontrada.');
+  if (!old) return showPanel(chatId, 'Key não encontrada.', [backAdmin], origin);
   if (action === 'pause' || action === 'resume' || action === 'reset' || action === 'delete') {
     const now = Date.now();
     const result = await ref.transaction(current => {
@@ -442,7 +528,7 @@ async function mutateKey(db, chatId, user, action, keyValue, messageId = null) {
       }
     });
     const fresh = (await ref.get()).val();
-    if (!result.committed) return sendMessage(chatId, 'A ação não pôde ser aplicada ao status atual da Key.');
+    if (!result.committed) return showPanel(chatId, 'A ação não pôde ser aplicada ao status atual da Key.', [backAdmin], origin);
     if (old.userId && ['pause', 'resume', 'reset', 'delete'].includes(action)) {
       const profilePatch = action === 'pause'
         ? { accessActive: false }
@@ -459,13 +545,11 @@ async function mutateKey(db, chatId, user, action, keyValue, messageId = null) {
     await appendAdminAction(db, user.id, action, { key: keyValue, previousStatus: old.status });
     const label = { pause: 'pausada', resume: 'retomada', reset: 'resetada e liberada para nova ativação', delete: 'revogada e excluída do uso' }[action];
     const notice = `✅ Key ${label}.`;
-    if (messageId) return showKey(db, chatId, keyValue, messageId, notice);
-    await sendMessage(chatId, notice);
-    return showKey(db, chatId, keyValue);
+    return showKey(db, chatId, keyValue, origin, notice);
   }
 }
 
-async function showStats(db, chatId) {
+async function showStats(db, chatId, origin = null) {
   const keys = db.ref(paths.keys);
   const [all, available, paused, revoked, active, explicitExpired, users] = await Promise.all([
     keys.get(), keys.orderByChild('status').equalTo('available').get(), keys.orderByChild('status').equalTo('paused').get(),
@@ -480,19 +564,19 @@ async function showStats(db, chatId) {
     else { activeCount++; if (value.userId) activeIds.add(String(value.userId)); }
   });
   const text = `📊 ESTATÍSTICAS MESTREXIT.IA\n\n🔑 Total de Keys geradas: ${all.numChildren()}\n⏳ Keys disponíveis: ${available.numChildren()}\n✅ Keys ativas: ${activeCount}\n⏸ Keys pausadas: ${paused.numChildren()}\n❌ Keys expiradas: ${expiredCount}\n🚫 Keys revogadas: ${revoked.numChildren()}\n👥 Contas cadastradas: ${users.numChildren()}\n🟢 Usuários com acesso ativo: ${activeIds.size}`;
-  return sendMessage(chatId, text, { reply_markup: keyboard([[{ text: '🔙 PAINEL ADM', callback_data: 'a:home' }]]) });
+  return showPanel(chatId, text, [backAdmin], origin);
 }
 
-async function showActiveUsers(db, chatId) {
+async function showActiveUsers(db, chatId, origin = null) {
   const snap = await db.ref(paths.users).orderByChild('accessActive').equalTo(true).limitToFirst(51).get();
   const rows = [];
   snap.forEach(child => { const u = child.val(); rows.push(`🆔 ${child.key} | ${u.username ? '@' + u.username : userName({ first_name: u.firstName })} | Key: ${u.licenseKey || '—'} | venc.: ${formatDate(u.expiresAt)}`); });
-  await sendMessage(chatId, `👥 USUÁRIOS ATIVOS (máx. 50 exibidos)\n\n${rows.slice(0, 50).join('\n') || 'Nenhum usuário ativo.'}`, { reply_markup: keyboard([[{ text: '🔙 PAINEL ADM', callback_data: 'a:home' }]]) });
+  return showPanel(chatId, `👥 USUÁRIOS ATIVOS (50 exibidos)\n\n${rows.slice(0, 50).join('\n') || 'Nenhum usuário ativo.'}`, [backAdmin], origin);
 }
 
-async function showAdmin(chatId, user) {
+async function showAdmin(chatId, user, origin = null) {
   if (!isAdmin(user.id)) return sendMessage(chatId, '🚫 ACESSO NEGADO!\n\n🔒 Esta área é exclusiva do administrador.');
-  return sendMessage(chatId, `👑 𝗣𝗔𝗜𝗡𝗘𝗟 𝗦𝗨𝗣𝗥𝗘𝗠𝗢\n\n⚡ MESTREXIT.IA ⚡\n\n${SEP}\n\n🤖 Bem-vindo, administrador!\n🔐 Controle administrativo liberado.\n\n${SEP}`, { reply_markup: adminKeyboard() });
+  return showPanel(chatId, `👑 PAINEL ADM — MESTREXIT.IA\n\n🔐 Acesso exclusivo do administrador.\n\nEscolha uma opção; este painel será atualizado sem acumular mensagens.`, adminKeyboard().inline_keyboard, origin);
 }
 
 async function help(chatId) {
@@ -515,7 +599,7 @@ async function handleMessage(db, message) {
   const command = raw.match(/^\/([a-z_]+)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   const name = command?.[1]?.toLowerCase();
   const arg = command?.[2] || '';
-  if (name === 'start') return home(chatId);
+  if (name === 'start') return home(chatId, user);
   if (name === 'key') return beginKey(chatId, user.id, db);
   if (name === 'id' || name === 'meuid') return showMyId(chatId, user);
   if (name === 'ajuda' || name === 'help') return help(chatId);
@@ -548,11 +632,24 @@ async function handleMessage(db, message) {
     if (validManualId(raw, user.id)) return activate(db, chatId, user, current.key);
     return requestApproval(db, chatId, user, current.key, raw);
   }
+  if (current.stage === 'await_custom_duration') {
+    if (!isAdmin(user.id)) return sendMessage(chatId, '🚫 Acesso negado.');
+    const chosen = parseCustomDuration(raw);
+    if (!chosen) return sendMessage(chatId, '⚠️ Duração inválida. Exemplos: 45m, 5h ou 120d (de 15 minutos a 3650 dias).');
+    await setState(db, user.id, { stage: 'await_quantity', durationId: 'custom', customDuration: chosen, panelMessageId: current.panelMessageId });
+    if (message.message_id) await deleteMessage(chatId, message.message_id).catch(() => {});
+    return showPanel(chatId, `✏️ Duração personalizada: ${chosen.label}\n\nQuantas Keys deseja gerar? Envie um número entre 1 e ${generationMax()}.`, [backAdmin], current.panelMessageId ? { message_id: current.panelMessageId, text: true } : null);
+  }
   if (current.stage === 'await_quantity') {
     if (!isAdmin(user.id)) return sendMessage(chatId, '🚫 Acesso negado.');
     const quantity = Number(raw);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > generationMax())
+      return sendMessage(chatId, `❌ Quantidade inválida: envie de 1 a ${generationMax()}.`);
     await clearState(db, user.id);
-    return createKeys(db, chatId, user, current.durationId, quantity);
+    const origin = current.panelMessageId ? { message_id: current.panelMessageId, text: true } : null;
+    const result = await createKeys(db, chatId, user, current.durationId, quantity, { origin, customDuration: current.customDuration });
+    if (message.message_id) await deleteMessage(chatId, message.message_id).catch(() => {});
+    return result;
   }
   const allowed = await access(db, user.id);
   if (!allowed.ok) return denied(chatId, allowed.reason);
@@ -583,37 +680,47 @@ async function handleCallback(db, callback) {
   if (data === 'u:showid') return showMyId(chatId, user);
   if (data.startsWith('u:approve:')) return decideApproval(db, chatId, user, data.slice('u:approve:'.length), true);
   if (data.startsWith('u:deny:')) return decideApproval(db, chatId, user, data.slice('u:deny:'.length), false);
-  if (data === 'u:home') return home(chatId);
-  if (data === 'a:home') return showAdmin(chatId, user);
-  if (data === 'a:gen') return startGeneration(db, chatId, user);
-  if (data === 'a:stats') return showStats(db, chatId);
-  if (data === 'a:users') return showActiveUsers(db, chatId);
+  if (data === 'u:home') {
+    await clearState(db, user.id);
+    return showNormalMenu(chatId, user, callback.message);
+  }
+  if (data === 'a:home') {
+    await clearState(db, user.id);
+    return showAdmin(chatId, user, callback.message);
+  }
+  if (data === 'a:gen') return startGeneration(db, chatId, user, callback.message);
+  if (data === 'a:stats') return showStats(db, chatId, callback.message);
+  if (data === 'a:users') return showActiveUsers(db, chatId, callback.message);
+  if (data === 'a:custom') {
+    await setState(db, user.id, { stage: 'await_custom_duration', panelMessageId: callback.message.message_id });
+    return showPanel(chatId, '✏️ DURAÇÃO PERSONALIZADA\n\nEnvie uma duração: 45m (minutos), 5h (horas) ou 120d (dias).\n\nMínimo: 15 minutos; máximo: 3650 dias.', [backAdmin], callback.message);
+  }
   if (data.startsWith('g:d:')) {
     const durationId = data.slice(4);
     if (!DURATIONS[durationId]) return sendMessage(chatId, 'Duração inválida.');
-    await setState(db, user.id, { stage: 'await_quantity', durationId });
-    return sendMessage(chatId, `⏱ Duração: ${DURATIONS[durationId].label}\n\nQuantas Keys deseja gerar? Informe um número entre 1 e ${Math.min(20, Number(process.env.MAX_KEYS_PER_GENERATION || 6))}.`);
+    await setState(db, user.id, { stage: 'await_quantity', durationId, panelMessageId: callback.message.message_id });
+    return showPanel(chatId, `⏱ Duração: ${DURATIONS[durationId].label}\n\nQuantas Keys deseja gerar? Envie um número de 1 a ${generationMax()}.`, [backAdmin], callback.message);
   }
   if (data.startsWith('l:')) {
     const [, filter = 'all', cursor = ''] = data.split(':');
     if (!['all', 'active', 'available', 'paused', 'expired', 'revoked'].includes(filter)) return sendMessage(chatId, 'Filtro inválido.');
-    return listKeys(db, chatId, filter, cursor);
+    return listKeys(db, chatId, filter, cursor, callback.message);
   }
-  if (data.startsWith('k:')) return showKey(db, chatId, data.slice(2), callback.message?.message_id);
+  if (data.startsWith('k:')) return showKey(db, chatId, data.slice(2), callback.message);
   if (data.startsWith('o:')) {
     const [, action, keyValue] = data.split(':');
     if (!validKeyFormat(keyValue)) return sendMessage(chatId, 'Key inválida.');
-    return mutateKey(db, chatId, user, action, keyValue, callback.message?.message_id);
+    return mutateKey(db, chatId, user, action, keyValue, callback.message);
   }
   if (data.startsWith('x:')) {
     const [, action, keyValue] = data.split(':');
     if (!['reset', 'delete'].includes(action) || !validKeyFormat(keyValue)) return sendMessage(chatId, 'Ação inválida.');
-    return confirmKeyAction(db, chatId, user, action, keyValue, callback.message?.message_id);
+    return confirmKeyAction(db, chatId, user, action, keyValue, callback.message);
   }
   if (data.startsWith('c:')) {
     const [, action, keyValue] = data.split(':');
     if (!['reset', 'delete'].includes(action) || !validKeyFormat(keyValue)) return sendMessage(chatId, 'Ação inválida.');
-    return mutateKey(db, chatId, user, action, keyValue, callback.message?.message_id);
+    return mutateKey(db, chatId, user, action, keyValue, callback.message);
   }
   return sendMessage(chatId, 'Opção não reconhecida. Use /start.');
 }

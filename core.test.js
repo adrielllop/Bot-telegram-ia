@@ -2,12 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ADMIN_ID, DURATIONS, activateKey, activationTransactionValue, durationOfKey, formatRemaining, isAdmin, licenseStatus,
-  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId
+  pauseKey, remainingMs, resetKey, resumeKey, validKeyFormat, validManualId, validTelegramId, parseCustomDuration
 } from './core.js';
 
-test('as dez durações especificadas são preservadas', () => {
-  assert.equal(Object.keys(DURATIONS).length, 10);
-  assert.deepEqual(Object.values(DURATIONS).map(x => x.label), ['1 HORA','6 HORAS','1 DIA','3 DIAS','7 DIAS','10 DIAS','15 DIAS','30 DIAS','60 DIAS','90 DIAS']);
+test('durações antigas continuam presentes e há 24 opções', () => {
+  assert.equal(Object.keys(DURATIONS).length, 24);
+  for (const id of ['1h','6h','1d','3d','7d','10d','15d','30d','60d','90d'])
+    assert.ok(DURATIONS[id]);
+  assert.equal(DURATIONS['365d'].ms, 365 * 86400000);
+});
+
+test('duração personalizada é validada sem depender do Firebase', () => {
+  assert.equal(parseCustomDuration('45m').ms, 45 * 60000);
+  assert.equal(parseCustomDuration('5h').label, '5 HORA(S)');
+  assert.equal(parseCustomDuration('120d').ms, 120 * 86400000);
+  assert.equal(parseCustomDuration('10m'), null);
+  assert.equal(parseCustomDuration('3651d'), null);
+  assert.equal(parseCustomDuration('qualquer'), null);
 });
 
 test('Keys novas de 6 dígitos e antigas de 16 continuam válidas', () => {

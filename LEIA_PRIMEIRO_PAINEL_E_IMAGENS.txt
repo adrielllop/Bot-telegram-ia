@@ -1,0 +1,27 @@
+MESTREXIT.IA — NOVA ATUALIZAÇÃO
+===============================
+
+O QUE MUDOU
+- Painel ADM edita a própria mensagem anterior; não cria nova mensagem para cada clique.
+- Botão VOLTAR AO MENU NORMAL e acesso ADM somente ao ID autorizado.
+- 24 durações e PERSONALIZADA (ex.: 45m, 5h, 120d).
+- Até 30 Keys por lote por padrão, ajustável até 50 por lote pela variável opcional MAX_KEYS_PER_GENERATION; é possível gerar quantos lotes precisar.
+- Lista paginada (8 na tela, botão PRÓXIMA para continuar). Não há limite total de 8 no Firebase.
+- Geração de lote em uma só mensagem. Entre na LISTA para copiar, pausar, resetar e excluir cada Key.
+- Mensagens de imagem distinguem falta de créditos e bloqueios/limites da API, e o contador de imagens do bot não aumenta quando a tentativa falha.
+
+COMO PUBLICAR PELO CELULAR
+1. Faça backup do conteúdo atual do GitHub.
+2. Abra o ZIP de SOMENTE ALTERADOS e extraia bot.js, core.js, core.test.js e telegram-api.js.
+3. No repositório atual adrielllop/Bot-telegram-ia, substitua os quatro arquivos pelos do ZIP, sem mudar os outros.
+4. Faça commit na branch main.
+5. Abra Vercel > Deployments e aguarde a versão Production ficar Ready.
+6. No Telegram, envie /admin, teste várias opções e VOLTAR AO MENU NORMAL.
+7. Gere 12 Keys e confirme que a lista mostra 8 e PRÓXIMA; abra outra página.
+8. Teste /imagem (com uma licença válida). Se o erro indicar falta de créditos, confira a conta da API em vez de trocar código ou Firebase.
+
+ATENÇÃO
+- Não substitua os valores do Firebase, token do Telegram, nem webhook. Não é preciso recriar dados.
+- Se o provedor de imagem retornar insufficient_quota, o código NÃO poderá gerar imagens sem crédito API.
+- A senha/token da API e a chave do Firebase devem permanecer somente nas variáveis da Vercel.
+- Esta versão foi testada com banco e Telegram simulados; falta testar na sua conta real após o deploy.

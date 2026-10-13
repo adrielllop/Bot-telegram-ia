@@ -13,7 +13,7 @@ Bot Node.js para Vercel Functions, com webhook do Telegram, Firebase Realtime Da
 - História de conversa separada por usuário; `/limpar` remove somente a própria conversa.
 - Limite diário de imagens por usuário configurável, controlado por transação Firebase.
 - `/admin` e todos os callbacks/operações administrativas conferem o `from.id` real contra `8646015281`.
-- Geração criptograficamente segura de Keys de 6 dígitos, todas as 10 durações, até 6 Keys por lote por padrão (máximo configurável 20), botão COPIAR KEY e gravação no Firebase antes de exibir.
+- Geração criptograficamente segura de Keys de 6 dígitos, 24 durações prontas e duração personalizada, até 30 Keys por lote por padrão (máximo configurável 50), botão COPIAR KEY e gravação no Firebase antes de exibir.
 - Listagem paginada por chave, detalhe, pausar, retomar com restante congelado, resetar (com confirmação), revogar/excluir (com confirmação), usuários ativos e estatísticas baseadas no Firebase.
 - Verificação de vencimento em cada operação protegida, controle de tentativas de Key e deduplicação de `update_id` com lease no Firebase.
 - Webhook confere o header `X-Telegram-Bot-Api-Secret-Token` com comparação de tempo constante.
@@ -107,7 +107,7 @@ Adicione `OPENAI_API_KEY` nas variáveis da Vercel. O padrão do código fornece
 
 ## Passo 9 — configurar geração de imagens
 
-Não precisa configurar outra variável de imagem: o código usa a mesma `OPENAI_API_KEY` e os padrões de endpoint e modelo definidos. A integração aceita retorno `b64_json` ou URL HTTP(S), baixa a imagem e envia o arquivo ao Telegram. Os dois PNG ficam diretamente na raiz do repositório. O padrão de upload é limitado a 9,5 MB para manter margem ao limite de foto do Bot API. O uso da API externa pode gerar cobrança e continua sujeito aos limites e regras do provedor.
+Por padrão a imagem usa a mesma `OPENAI_API_KEY`; a variável `IMAGE_API_KEY` pode ser configurada separadamente, se necessário. A integração aceita retorno `b64_json` ou URL HTTP(S), baixa a imagem e envia o arquivo ao Telegram. Os dois PNG ficam diretamente na raiz do repositório. O padrão de upload é limitado a 9,5 MB para manter margem ao limite de foto do Bot API. O uso da API externa pode gerar cobrança e continua sujeito aos limites e regras do provedor.
 
 **Tempo de execução (limitação conhecida):** o fluxo de imagem é síncrono, com timeout reduzido para deixar margem dentro de uma função Vercel de 60 segundos. Ele não mantém um processo contínuo nem simula imagens. Se o provedor exceder esse limite, a solicitação falha com mensagem de timeout; **a fila/worker assíncrono persistente para tarefas longas ainda precisa ser integrada** (por exemplo, Cloud Tasks/Cloud Run ou serviço equivalente), provisionada e testada antes de uso com provedores lentos ou tarefas longas. Esse componente externo não foi incluído nesta entrega.
 
@@ -122,7 +122,7 @@ Os testes unitários são locais e não acessam serviços externos. Após deploy
 
 ## Testes nesta entrega
 
-- Testes locais de formato da Key de 6 dígitos (com compatibilidade com 16 dígitos), lista das dez durações, controle de admin, correspondência do ID, ativação e timestamp de vencimento, pausa/retomada, reset, expiração e formatação do restante.
+- Testes locais de formato da Key de 6 dígitos (com compatibilidade com 16 dígitos), lista de 24 durações e duração personalizada, controle de admin, correspondência do ID, ativação e timestamp de vencimento, pausa/retomada, reset, expiração e formatação do restante.
 - Checagem sintática Node para a aplicação.
 - **Não executados sem credenciais:** integração real com Telegram, Firebase, APIs de texto/imagem, webhook registrado, validação de deployment na sua conta Vercel, Android/iOS/Telegram Web. A imagem tutorial é a captura fornecida pelo usuário; o botão “MOSTRAR MEU ID” usa o ID do próprio callback de Telegram.
 
@@ -139,7 +139,7 @@ Os testes unitários são locais e não acessam serviços externos. Após deploy
 
 ## Segurança e observações operacionais
 
-- O ID de admin está fixado no código em `8646015281` e não é configurável por variável de ambiente.
+- O ID administrativo padrão está no código. Opcionalmente, `ADMIN_TELEGRAM_ID` na Vercel pode substituir esse ID; confirme o número correto antes de configurar.
 - As ações admin verificam `callback_query.from.id` ou `message.from.id` em cada operação, não somente ao abrir o painel.
 - A transação na Key protege contra duas contas simultâneas. A atualização da Key e do perfil do usuário ocorre em duas gravações Firebase separadas; o handler permite reparar o vínculo do mesmo usuário numa repetição após interrupção, mas deploys altamente críticos podem adicionar reconciliação periódica.
 - Revoke/delete é lógico e mantém registro mínimo; o acesso é revogado imediatamente. Reset é ação distinta e reabre a licença.
@@ -158,3 +158,16 @@ Os testes unitários são locais e não acessam serviços externos. Após deploy
 - O Realtime Database existente NÃO é apagado nem recriado. Os nós `activationRequests` e `activation` são criados automaticamente no servidor pelo Firebase Admin. `database.rules.json` não é publicado automaticamente no Firebase apenas por estar no GitHub. Como as regras atuais negam acessos de clientes e o bot usa Admin SDK, **não é necessário alterar as regras para essa funcionalidade**.
 - Se o repositório GitHub tiver correções posteriores à versão original deste ZIP, compare-as antes de substituir todos os arquivos; o ZIP base enviado ainda tinha `firebase.js` e `vercel.json` antigos.
 - Testes ao vivo de Firebase/Telegram não foram realizados sem acesso às credenciais.
+
+
+## Atualização de painel, durações e imagens (13/10/2026)
+
+- O painel administrativo atualiza **a mesma mensagem** ao tocar nos botões; quando a origem é foto, ela é excluída e substituída por um texto. Se o Telegram não permitir editar/excluir a mensagem original, o bot faz fallback enviando outra mensagem.
+- O botão **🏠 VOLTAR AO MENU NORMAL** fecha a navegação administrativa e mostra as opções comuns. Somente a conta reconhecida por `isAdmin` visualiza o botão do painel, e todos os callbacks administrativos também conferem o ID verdadeiro.
+- O catálogo inclui **24 durações predefinidas** e opção de **duração personalizada** (`45m`, `5h`, `120d`; entre 15 minutos e 3650 dias). Durações preexistentes continuam aceitas.
+- O painel lista **8 Keys por página**, com botão PRÓXIMA. Isso é apenas paginação, **não** limita o total de Keys no Realtime Database. Há **30 Keys por lote** por padrão (até 50 por lote com `MAX_KEYS_PER_GENERATION`), e você pode gerar outros lotes.
+- Uma geração em lote resulta em **uma única mensagem resumida**, sem criar dezenas de mensagens separadas. Cada Key pode ser aberta pela LISTA para copiar, pausar ou revogar.
+- Geração de imagens distingue falta de créditos/billing, erro de autorização, limite de taxa e parâmetros inválidos. Uma geração com erro não consome a cota diária do bot, e a mensagem temporária de progresso é removida quando possível.
+- `IMAGE_TIMEOUT_MS` pode ser ajustado (padrão 55000 ms, teto no código 90000 ms), desde que o limite da função Vercel comporte esse tempo. **O código não contorna cotas, exigências de pagamento nem limites de gastos do provedor**. O plano ChatGPT Plus é separado da API.
+- Verifique a API com logs `image_provider_error` e o faturamento da API do seu provedor caso apareça aviso de falta de créditos. Não cole suas chaves nos logs públicos ou em chats.
+- Arquivos modificados: `bot.js`, `core.js`, `telegram-api.js`, `core.test.js`. Sem migração de dados e sem alterações necessárias em `firebase.js`, `database.rules.json`, `vercel.json` ou no webhook.

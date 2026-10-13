@@ -20,6 +20,7 @@ export const sendMessage = (chatId, text, extra = {}) => tg('sendMessage', { cha
 export const editMessage = (chatId, messageId, text, extra = {}) => tg('editMessageText', { chat_id: chatId, message_id: messageId, text, ...extra });
 export const answerCallback = (id, text = '', showAlert = false) => tg('answerCallbackQuery', { callback_query_id: id, text, show_alert: showAlert });
 export const sendChatAction = (chatId, action) => tg('sendChatAction', { chat_id: chatId, action });
+export const deleteMessage = (chatId, messageId) => tg('deleteMessage', { chat_id: chatId, message_id: messageId });
 
 async function sendAsset(method, chatId, filename, fields, fileField = 'photo') {
   const bytes = await readFile(path.join(ROOT, filename));
